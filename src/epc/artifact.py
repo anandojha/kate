@@ -63,8 +63,21 @@ class Artifact:
     x_mean: Optional[np.ndarray] = None        # (3N,) mean config in aligned space
     # --- T4 residual stage (added by T4; None until then) ---
     residual: Optional[dict] = None
-    # --- flow weights (a torch state_dict; None when loaded with_flow=False) ---
+    # --- T8 temporal learned-entropy model (None unless entropy == "temporal") ---
+    temporal_arch: Optional[dict] = None
+    # --- flow + temporal weights (torch state_dicts; None when loaded with_flow=False) ---
     flow_state: Optional[dict] = field(default=None, repr=False)
+    temporal_state: Optional[dict] = field(default=None, repr=False)
+
+    def build_temporal(self):
+        """Reconstruct the live TemporalPrior from arch + state (imports torch lazily)."""
+        if self.temporal_state is None or self.temporal_arch is None:
+            return None
+        from .temporal_prior import TemporalPrior
+        m = TemporalPrior(**self.temporal_arch)
+        m.load_state_dict(self.temporal_state)
+        m.eval()
+        return m
 
     # ---- convenience ----
     def build_flow(self):
@@ -92,7 +105,7 @@ class Artifact:
 # config.json holds only JSON-friendly scalars/lists/strings.
 _CONFIG_KEYS = ("cv_dim", "L", "zmax", "n_keep", "run_lengths", "n_states", "lag",
                 "stride", "dt_ps", "dt_strided_ns", "flow_arch", "cv", "flow_kind",
-                "entropy")
+                "entropy", "temporal_arch")
 
 
 def save_artifact(art: Artifact, path: str) -> str:
@@ -125,6 +138,9 @@ def save_artifact(art: Artifact, path: str) -> str:
     if art.flow_state is not None:
         import torch
         torch.save(art.flow_state, os.path.join(path, "flow.pt"))
+    if art.temporal_state is not None:
+        import torch
+        torch.save(art.temporal_state, os.path.join(path, "temporal.pt"))
     return path
 
 
@@ -146,10 +162,13 @@ def load_artifact(path: str, with_flow: bool = True) -> Artifact:
     if res_keys:
         residual = {k[len("residual__"):]: npz[k] for k in res_keys}
 
-    flow_state = None
+    flow_state = temporal_state = None
     if with_flow and os.path.exists(os.path.join(path, "flow.pt")):
         import torch
         flow_state = torch.load(os.path.join(path, "flow.pt"), weights_only=True)
+    if with_flow and os.path.exists(os.path.join(path, "temporal.pt")):
+        import torch
+        temporal_state = torch.load(os.path.join(path, "temporal.pt"), weights_only=True)
 
     return Artifact(
         cv_dim=int(cfg["cv_dim"]), L=int(cfg["L"]), zmax=float(cfg["zmax"]),
@@ -169,5 +188,7 @@ def load_artifact(path: str, with_flow: bool = True) -> Artifact:
         tica_timescales=npz["tica_timescales"] if "tica_timescales" in npz.files else None,
         align_ref=npz["align_ref"] if "align_ref" in npz.files else None,
         x_mean=npz["x_mean"] if "x_mean" in npz.files else None,
-        residual=residual, flow_state=flow_state,
+        residual=residual,
+        temporal_arch=cfg.get("temporal_arch"), temporal_state=temporal_state,
+        flow_state=flow_state,
     )

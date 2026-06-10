@@ -51,11 +51,11 @@ def cmd_compress(args):
         args.top, args.dcd, stride=args.stride, cv_dim=args.cv_dim,
         keep_frac=args.keep_frac, epochs=args.epochs, nstates=args.nstates,
         lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
-        n_bits=args.n_bits, streaming=args.streaming, chunk=args.chunk)
-    # method tags (T6-T8 opt-ins; defaults keep the tested baseline)
+        n_bits=args.n_bits, streaming=args.streaming, chunk=args.chunk,
+        entropy=args.entropy)
+    # CV / flow opt-in tags (T6 / T7 wire the alternatives; entropy is handled above)
     art.cv = args.cv
     art.flow_kind = args.flow
-    art.entropy = args.entropy
     print_report(report)
     save_artifact(art, args.out)
     print("  artifact written      : %s" % args.out)

@@ -48,7 +48,8 @@ def kl_1d(p, q, bins):
 
 
 def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epochs,
-                       nstates, lag, stride, dt_ps, lat_bits, n_bits, seed, verbose):
+                       nstates, lag, stride, dt_ps, lat_bits, n_bits, seed, verbose,
+                       entropy="gaussian"):
     """Shared post-CV core: flow density -> IGFS -> entropy code -> retained MSM ->
     path bound -> full-atom residual -> Artifact. ``fetch_kept(global_indices)``
     returns the aligned flat coords (n_keep, 3N) for the kept frames (in-RAM slice for
@@ -122,6 +123,21 @@ def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epo
     fullatom_rmsd = float(np.sqrt(((full_rec - X_kept) ** 2)
                                   .reshape(len(kept), -1, 3).sum(2).mean()))
 
+    # --- T8: temporal learned-entropy model (rate WITH vs WITHOUT, over all frames) ---
+    temporal_arch = temporal_state = None
+    rate_gaussian_bpv = rate_temporal_bpv = None
+    if entropy == "temporal":
+        from .temporal_prior import (TemporalPrior, gaussian_rate_bits_per_value,
+                                     temporal_rate_bits_per_value)
+        if verbose:
+            print("  training temporal prior on the %d-frame latent sequence ..." % T_total)
+        temporal_arch = {"dim": cv_dim, "hidden": 64, "n_layers": 3}
+        tmodel = TemporalPrior(**temporal_arch).fit(
+            z_all, epochs=max(100, epochs // 2), verbose=False, seed=seed)
+        rate_gaussian_bpv = gaussian_rate_bits_per_value(z_all, L, zmax)
+        rate_temporal_bpv = temporal_rate_bits_per_value(z_all, tmodel, L, zmax)
+        temporal_state = {k: v.detach().cpu() for k, v in tmodel.state_dict().items()}
+
     artifact = Artifact(
         cv_dim=cv_dim, L=L, zmax=zmax, n_keep=len(kept),
         coded_latents=coded, kept_idx=kept,
@@ -129,10 +145,11 @@ def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epo
         T_msm=T_msm, n_states=nstates, lag=lag,
         stride=stride, dt_ps=dt_ps, dt_strided_ns=dt_strided_ns,
         flow_arch={"dim": cv_dim, "hidden": 64, "n_layers": 10},
-        cv="tica", flow_kind="realnvp", entropy="gaussian",
+        cv="tica", flow_kind="realnvp", entropy=entropy,
         tica_mean=tica.mean_, tica_eigvecs=tica.eigvecs_,
         tica_timescales=tica.timescales_,
         align_ref=ref, x_mean=tica.mean_, residual=residual,
+        temporal_arch=temporal_arch, temporal_state=temporal_state,
         flow_state={k: v.detach().cpu() for k, v in flow.state_dict().items()},
     )
     flow_bytes = sum(p.numel() for p in flow.parameters()) * 4
@@ -145,14 +162,16 @@ def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epo
         "residual_bits": int(rq.size) * n_bits, "state_mean_bits": int(state_mean_R.size) * 32,
         "flow_bytes": flow_bytes, "coded_bytes": len(coded),
         "implied_timescales_ns": its_ns, "lag": lag, "dt_strided_ns": dt_strided_ns,
-        "kinetic_bound": kin,
+        "kinetic_bound": kin, "entropy": entropy,
+        "rate_gaussian_bpv": rate_gaussian_bpv, "rate_temporal_bpv": rate_temporal_bpv,
     }
     return artifact, report
 
 
 def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.10,
                         epochs=300, nstates=200, lag=10, stride=1, dt_ps=100.0,
-                        lat_bits=14, n_bits=4, seed=0, verbose=True) -> Tuple[Artifact, dict]:
+                        lat_bits=14, n_bits=4, seed=0, verbose=True,
+                        entropy="gaussian") -> Tuple[Artifact, dict]:
     """In-RAM, run-aware flow-based EPC on a list of (T_i, N, 3) arrays (nm)."""
     ref = None
     aligned = []
@@ -168,13 +187,14 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.
     return _assemble_artifact(CV_runs, lambda idx: X_all[idx], tica, ref,
                               cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
-                              lat_bits=lat_bits, n_bits=n_bits, seed=seed, verbose=verbose)
+                              lat_bits=lat_bits, n_bits=n_bits, seed=seed,
+                              verbose=verbose, entropy=entropy)
 
 
 def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_dim=6,
                        keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
                        dt_ps=100.0, lat_bits=14, n_bits=4, seed=0,
-                       verbose=True) -> Tuple[Artifact, dict]:
+                       verbose=True, entropy="gaussian") -> Tuple[Artifact, dict]:
     """T5: out-of-core EPC. ``chunk_factory()`` returns a FRESH iterator of (T_c, N, 3)
     coordinate chunks (e.g. from md.iterload). The trajectory is treated as ONE
     continuous run; the whole thing is never held in RAM -- only the small CVs and the
@@ -231,12 +251,14 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
     return _assemble_artifact([CV_all], fetch_kept, tica, ref,
                               cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
-                              lat_bits=lat_bits, n_bits=n_bits, seed=seed, verbose=verbose)
+                              lat_bits=lat_bits, n_bits=n_bits, seed=seed,
+                              verbose=verbose, entropy=entropy)
 
 
 def run_epc(top: str, dcd: str, *, stride=10, cv_dim=6, keep_frac=0.10, epochs=300,
             nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, n_bits=4, seed=0,
-            streaming=False, chunk=2000, verbose=True) -> Tuple[Artifact, dict]:
+            streaming=False, chunk=2000, entropy="gaussian",
+            verbose=True) -> Tuple[Artifact, dict]:
     """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based EPC.
     ``streaming=True`` uses the out-of-core path (chunked md.iterload)."""
     import mdtraj as md
@@ -252,7 +274,7 @@ def run_epc(top: str, dcd: str, *, stride=10, cv_dim=6, keep_frac=0.10, epochs=3
     sel = heavy_indices(topo)
     kw = dict(cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs, nstates=nstates,
               lag=lag, stride=stride, dt_ps=dt_ps, lat_bits=lat_bits, n_bits=n_bits,
-              seed=seed, verbose=verbose)
+              seed=seed, verbose=verbose, entropy=entropy)
     if streaming:
         def factory():
             return (np.asarray(ch.xyz, dtype=np.float64) for ch in
@@ -287,6 +309,14 @@ def print_report(report: dict) -> None:
           % (r["flow_bytes"] / 1e6, r["coded_bytes"] / 1e6))
     print("  residual / state-means: %.3f / %.3f MB  (full-atom side, charged honestly)"
           % (r["residual_bits"] / 8e6, r["state_mean_bits"] / 8e6))
+    if r.get("rate_temporal_bpv") is not None:
+        rg, rt = r["rate_gaussian_bpv"], r["rate_temporal_bpv"]
+        print("LEARNED-ENTROPY CODING (T8; latent rate, all frames)")
+        print("  bits/value  gaussian / temporal : %.4f / %.4f  (%.1f%% %s)"
+              % (rg, rt, 100 * (rg - rt) / rg,
+                 "saved" if rt <= rg else "WORSE -- no inter-frame redundancy here"))
+        print("  NOTE: the flow already Gaussianizes per frame; T8 exploits only INTER-")
+        print("  frame redundancy -- at 100 ps spacing the real-data gain may be modest.")
     print("KINETICS (MSM dynamics term)")
     print("  implied timescales    : %s ns" % np.round(r["implied_timescales_ns"], 1))
     print("KINETIC BOUND (path-distribution; retained Q vs reference P = full-data MSM)")
