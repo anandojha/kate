@@ -1,31 +1,26 @@
 #!/usr/bin/env python
 """
-runner.py -- flow-based EPC on real (or array) trajectories, the SCALABLE way, and
-the backend for ``epc compress``.
+runner.py -- flow-based EPC on real (or array) trajectories, and the backend for
+``epc compress``. Reduces to a few TICA collective variables FIRST and trains the
+flow on those (the abstract's stage-1 ordering), tractable at 3N ~ 5000.
 
-Unlike examples/demo_epc.py (flow on full Cartesian, only for tiny systems), this
-reduces to a few TICA collective variables FIRST and trains the flow on those -- the
-abstract's stage-1 ordering -- so it is tractable at 3N ~ 5000. The CV-space ensemble
-is reconstructed exactly; full-atom reconstruction of the fast modes is the residual
-stage [T4].
+Three entry points share one post-CV core (``_assemble_artifact``):
+  * compress_trajectory(coords_runs)  -- in-RAM, run-aware (the default).
+  * compress_streaming(chunk_factory)  -- T5: STREAMING TICA (partial_fit, chunked) so
+    the CV step scales past RAM; the whole trajectory is never held (only the small
+    CVs and the sparse kept frames are). Multi-pass: (1) fit streaming TICA, (2)
+    transform -> CVs + train flow + IGFS + MSM, (3) read only the KEPT frames for the
+    residual. Streaming TICA == batch TICA exactly (cross-chunk lagged pairs kept).
+  * run_epc(top, dcd[, streaming=True])  -- the DCD loader for both.
 
-T1 additions over the original run_epc.py script:
-  * factored into ``compress_trajectory(coords_runs, ...) -> (Artifact, report)`` (the
-    core, run-aware) and ``run_epc(top, dcd, ...)`` (the DCD loader);
-  * the path bound is wired in: after the retained MSM (Q) we also form the reference
-    MSM (P) from the full-data discretization and call
-    ``pathbound.report_kinetic_fidelity(P, Q)``. For EPC P == Q (the artifact RETAINS
-    the MSM), so the transition term is ~0 by construction -- EPC's kinetic distortion
-    is ~0. The bound's real use as a contrast SCORER is ``epc bound`` / ``epc benchmark``.
-
-USAGE (compute node, not a login node):
-  python -m epc.runner TOP DCD [--stride 10] [--cv-dim 6] [--keep-frac 0.1]
-       [--epochs 300] [--nstates 200] [--lag-ns 5] [--dt-ps 100] [-o OUT.epc]
+The path bound is wired in (T1): for EPC the retained MSM Q == the full-data reference
+P, so the transition term is ~0 by construction. The full-atom residual stage (T4)
+recovers the fast modes TICA discards.
 """
 from __future__ import annotations
 
 import argparse
-from typing import List, Optional, Tuple
+from typing import Callable, Iterable, List, Tuple
 
 import numpy as np
 import torch
@@ -52,30 +47,16 @@ def kl_1d(p, q, bins):
     return float((a * np.log(a / b)).sum())
 
 
-def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.10,
-                        epochs=300, nstates=200, lag=10, stride=1, dt_ps=100.0,
-                        lat_bits=14, n_bits=4, seed=0, verbose=True) -> Tuple[Artifact, dict]:
-    """Run-aware flow-based EPC on a list of (T_i, N, 3) coordinate arrays (nm).
-    Returns (Artifact, report dict). The MSM/TICA lag is in (strided) frames."""
+def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epochs,
+                       nstates, lag, stride, dt_ps, lat_bits, n_bits, seed, verbose):
+    """Shared post-CV core: flow density -> IGFS -> entropy code -> retained MSM ->
+    path bound -> full-atom residual -> Artifact. ``fetch_kept(global_indices)``
+    returns the aligned flat coords (n_keep, 3N) for the kept frames (in-RAM slice for
+    the batch path; a streamed read for the out-of-core path)."""
     dt_strided_ns = stride * dt_ps / 1000.0
-
-    # --- align (run-aware, shared reference) + flatten ---
-    ref = None
-    aligned = []
-    for r in coords_runs:
-        a, ref = kabsch_align(np.asarray(r, dtype=np.float64), ref)
-        aligned.append(a.reshape(a.shape[0], -1))
-    run_lengths = [a.shape[0] for a in aligned]
-    X_all = np.concatenate(aligned, axis=0)
-    T_total = X_all.shape[0]
-
-    # --- stage 1: TICA -> CVs ---
-    tica = TICA(lag=lag, n_components=cv_dim).fit(aligned)
-    CV_runs = [tica.transform(a).astype(np.float32) for a in aligned]
-    CV_all = np.concatenate(CV_runs, axis=0)
-    if verbose:
-        print("  TICA CVs              : %s   leading timescales (frames): %s"
-              % (CV_all.shape, np.round(tica.timescales_[:cv_dim], 1)))
+    CV_all = np.concatenate(CV_runs, axis=0).astype(np.float32)
+    run_lengths = [c.shape[0] for c in CV_runs]
+    T_total = CV_all.shape[0]
 
     # --- stage 2: flow density on the CVs ---
     if verbose:
@@ -85,7 +66,7 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.
     with torch.no_grad():
         z_all = flow.forward(torch.as_tensor(CV_all))[0].numpy()
 
-    # --- stage 3: IGFS + lossless coding of kept latents (vs N(0,I)) ---
+    # --- stage 3: IGFS + lossless coding of kept latents vs N(0,I) ---
     n_keep = max(2, int(keep_frac * T_total))
     kept = igfs_select(z_all, n_keep, seed=seed)
     L = 1 << lat_bits
@@ -94,8 +75,6 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.
     lev = np.clip(np.floor((np.clip(z_all[kept], -zmax, zmax) + zmax) /
                            (2 * zmax) * L).astype(np.int64), 0, L - 1).ravel()
     coded = encode_iid(lev, cum)
-
-    # CV-space reconstruction error (exact up to quantization)
     dlev = decode_iid(coded, len(kept) * cv_dim, cum).reshape(len(kept), cv_dim)
     zrec = -zmax + (dlev + 0.5) * (2 * zmax / L)
     with torch.no_grad():
@@ -115,26 +94,20 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.
     labels, centers = discretize(CV_runs, nstates, seed)
     C = count_matrix(labels, nstates, lag)
     T_msm, _ = transition_matrix(C, reversible=True)
-
-    # --- the path bound, wired in (T1): reference P (full data) vs retained Q ---
     act = largest_connected_set(C)
     Tm_act, _ = transition_matrix(C[np.ix_(act, act)], reversible=True)
     its = implied_timescales(Tm_act, lag, 5)
     its_ns = its * dt_strided_ns
-    # EPC RETAINS the MSM -> Q == P on the kept dynamics -> transition term ~ 0.
-    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)
+    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # EPC: Q==P
 
-    # --- T4: full-atom residual stage (the fast modes TICA discards) ---
-    # The kept frames' CV reconstructs the SLOW modes (flow inverse of the decoded
-    # latents); the residual recovers the rest of the 3N coordinates. It is defined
-    # against the DECODED CV (cv_rec), so it absorbs the latent quantization exactly,
-    # then a per-state mean + a subtractive-dithered uniform quantizer code it cheaply.
+    # --- T4: full-atom residual stage (fast modes TICA discards) ---
     labels_all = np.concatenate(labels)
-    Vp = np.linalg.pinv(tica.eigvecs_)                       # (cv_dim, 3N)
-    X_approx_kept = tica.mean_ + cv_rec @ Vp                 # CV-subspace recon (decoded)
-    R_kept = X_all[kept] - X_approx_kept                     # discarded fast modes (3N)
+    Vp = np.linalg.pinv(tica.eigvecs_)
+    X_kept = np.asarray(fetch_kept(kept), dtype=np.float64)          # (n_keep, 3N) aligned
+    X_approx_kept = tica.mean_ + cv_rec @ Vp
+    R_kept = X_kept - X_approx_kept
     labels_kept = labels_all[kept]
-    D = X_all.shape[1]
+    D = X_kept.shape[1]
     state_mean_R = np.zeros((nstates, D))
     for s in np.unique(labels_kept):
         state_mean_R[s] = R_kept[labels_kept == s].mean(axis=0)
@@ -145,9 +118,8 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.
     residual = {"state_mean_R": state_mean_R, "q": rq, "step": rstep,
                 "n_bits": n_bits, "seed": seed, "labels_kept": labels_kept,
                 "n_atoms": D // 3}
-    # honest self-check of the residual round-trip (full-atom recon error)
     full_rec = X_approx_kept + rcodec.dequantize(rq, rstep) + state_mean_R[labels_kept]
-    fullatom_rmsd = float(np.sqrt(((full_rec - X_all[kept]) ** 2)
+    fullatom_rmsd = float(np.sqrt(((full_rec - X_kept) ** 2)
                                   .reshape(len(kept), -1, 3).sum(2).mean()))
 
     artifact = Artifact(
@@ -160,21 +132,17 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.
         cv="tica", flow_kind="realnvp", entropy="gaussian",
         tica_mean=tica.mean_, tica_eigvecs=tica.eigvecs_,
         tica_timescales=tica.timescales_,
-        align_ref=ref, x_mean=X_all.mean(axis=0),
-        residual=residual,
+        align_ref=ref, x_mean=tica.mean_, residual=residual,
         flow_state={k: v.detach().cpu() for k, v in flow.state_dict().items()},
     )
-
     flow_bytes = sum(p.numel() for p in flow.parameters()) * 4
-    residual_bits = int(rq.size) * n_bits
-    state_mean_bits = int(state_mean_R.size) * 32
     report = {
         "frames": T_total, "run_lengths": run_lengths,
         "kl_cv1_nats": KL, "pinsker_cv1": float(np.sqrt(KL / 2)),
         "bounded_obs_diff": obs, "pinsker_ok": bool(obs <= np.sqrt(KL / 2) + 1e-9),
         "n_keep": len(kept), "keep_frac": len(kept) / T_total, "cv_recon_err": cv_err,
         "fullatom_rmsd": fullatom_rmsd, "n_bits": n_bits,
-        "residual_bits": residual_bits, "state_mean_bits": state_mean_bits,
+        "residual_bits": int(rq.size) * n_bits, "state_mean_bits": int(state_mean_R.size) * 32,
         "flow_bytes": flow_bytes, "coded_bytes": len(coded),
         "implied_timescales_ns": its_ns, "lag": lag, "dt_strided_ns": dt_strided_ns,
         "kinetic_bound": kin,
@@ -182,30 +150,121 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.
     return artifact, report
 
 
+def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.10,
+                        epochs=300, nstates=200, lag=10, stride=1, dt_ps=100.0,
+                        lat_bits=14, n_bits=4, seed=0, verbose=True) -> Tuple[Artifact, dict]:
+    """In-RAM, run-aware flow-based EPC on a list of (T_i, N, 3) arrays (nm)."""
+    ref = None
+    aligned = []
+    for r in coords_runs:
+        a, ref = kabsch_align(np.asarray(r, dtype=np.float64), ref)
+        aligned.append(a.reshape(a.shape[0], -1))
+    X_all = np.concatenate(aligned, axis=0)
+    tica = TICA(lag=lag, n_components=cv_dim).fit(aligned)
+    CV_runs = [tica.transform(a) for a in aligned]
+    if verbose:
+        print("  TICA CVs              : (%d, %d)   leading timescales (frames): %s"
+              % (X_all.shape[0], cv_dim, np.round(tica.timescales_[:cv_dim], 1)))
+    return _assemble_artifact(CV_runs, lambda idx: X_all[idx], tica, ref,
+                              cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
+                              nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
+                              lat_bits=lat_bits, n_bits=n_bits, seed=seed, verbose=verbose)
+
+
+def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_dim=6,
+                       keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
+                       dt_ps=100.0, lat_bits=14, n_bits=4, seed=0,
+                       verbose=True) -> Tuple[Artifact, dict]:
+    """T5: out-of-core EPC. ``chunk_factory()`` returns a FRESH iterator of (T_c, N, 3)
+    coordinate chunks (e.g. from md.iterload). The trajectory is treated as ONE
+    continuous run; the whole thing is never held in RAM -- only the small CVs and the
+    sparse kept frames. Streaming TICA accumulates the same covariances as the batch
+    path, so the TICA, the (seeded) discretization, the retained MSM, and the kinetics
+    are IDENTICAL to compress_trajectory. (The flow/IGFS exemplar selection may differ
+    run-to-run -- torch CPU multi-threading is non-deterministic in the flow training --
+    but the kinetics, ensemble, and bound are unaffected.)"""
+    # reference = first frame of the first chunk (centered) -- same as the batch path
+    first_chunk = next(iter(chunk_factory()))
+    ref = np.asarray(first_chunk[0], dtype=np.float64)
+    ref = ref - ref.mean(axis=0, keepdims=True)
+
+    # PASS 1: streaming TICA (chunked partial_fit)
+    if verbose:
+        print("  [pass 1] streaming TICA partial_fit ...")
+    tica = TICA(lag=lag, n_components=cv_dim)
+    for i, chunk in enumerate(chunk_factory()):
+        a, _ = kabsch_align(np.asarray(chunk, dtype=np.float64), ref)
+        tica.partial_fit(a.reshape(a.shape[0], -1), run_start=(i == 0))
+    tica.finalize()
+    if verbose:
+        print("  TICA CVs              : %d-D   leading timescales (frames): %s"
+              % (cv_dim, np.round(tica.timescales_[:cv_dim], 1)))
+
+    # PASS 2: transform -> CVs (small; collected in RAM)
+    if verbose:
+        print("  [pass 2] transform -> CVs ...")
+    CV_chunks = []
+    for chunk in chunk_factory():
+        a, _ = kabsch_align(np.asarray(chunk, dtype=np.float64), ref)
+        CV_chunks.append(tica.transform(a.reshape(a.shape[0], -1)))
+    CV_all = np.concatenate(CV_chunks, axis=0)
+
+    # PASS 3 (lazy): fetch ONLY the kept frames' aligned coords for the residual
+    def fetch_kept(kept_idx):
+        kept_idx = np.asarray(kept_idx, dtype=np.int64)
+        kmap = {int(g): i for i, g in enumerate(kept_idx)}
+        kset = set(kmap)
+        out = np.zeros((len(kept_idx), ref.shape[0] * 3))
+        pos = 0
+        for chunk in chunk_factory():
+            a, _ = kabsch_align(np.asarray(chunk, dtype=np.float64), ref)
+            af = a.reshape(a.shape[0], -1)
+            for j in range(af.shape[0]):
+                g = pos + j
+                if g in kset:
+                    out[kmap[g]] = af[j]
+            pos += af.shape[0]
+        return out
+
+    if verbose:
+        print("  [pass 3] residual for kept frames (streamed) ...")
+    return _assemble_artifact([CV_all], fetch_kept, tica, ref,
+                              cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
+                              nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
+                              lat_bits=lat_bits, n_bits=n_bits, seed=seed, verbose=verbose)
+
+
 def run_epc(top: str, dcd: str, *, stride=10, cv_dim=6, keep_frac=0.10, epochs=300,
-            nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, seed=0,
-            verbose=True) -> Tuple[Artifact, dict]:
+            nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, n_bits=4, seed=0,
+            streaming=False, chunk=2000, verbose=True) -> Tuple[Artifact, dict]:
     """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based EPC.
-    The DCD backend for ``epc compress``."""
+    ``streaming=True`` uses the out-of-core path (chunked md.iterload)."""
     import mdtraj as md
     dt_strided_ns = stride * dt_ps / 1000.0
     lag = max(1, int(round(lag_ns / dt_strided_ns)))
     if verbose:
         print("=" * 70)
-        print("EPC on %s  (stride %d -> %.3f ns/frame, lag %d frames = %.2f ns)"
-              % (dcd, stride, dt_strided_ns, lag, lag * dt_strided_ns))
+        print("EPC on %s  (stride %d -> %.3f ns/frame, lag %d frames = %.2f ns%s)"
+              % (dcd, stride, dt_strided_ns, lag, lag * dt_strided_ns,
+                 ", STREAMING" if streaming else ""))
         print("=" * 70)
     topo = md.load_topology(top)
     sel = heavy_indices(topo)
+    kw = dict(cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs, nstates=nstates,
+              lag=lag, stride=stride, dt_ps=dt_ps, lat_bits=lat_bits, n_bits=n_bits,
+              seed=seed, verbose=verbose)
+    if streaming:
+        def factory():
+            return (np.asarray(ch.xyz, dtype=np.float64) for ch in
+                    md.iterload(dcd, top=top, chunk=chunk, atom_indices=sel, stride=stride))
+        return compress_streaming(factory, **kw)
     chunks = []
-    for ch in md.iterload(dcd, top=top, chunk=2000, atom_indices=sel, stride=stride):
+    for ch in md.iterload(dcd, top=top, chunk=chunk, atom_indices=sel, stride=stride):
         chunks.append(np.asarray(ch.xyz, dtype=np.float64))
     coords = np.concatenate(chunks, 0)
     if verbose:
         print("  loaded                : %s (nm), %d heavy atoms" % (coords.shape, len(sel)))
-    return compress_trajectory([coords], cv_dim=cv_dim, keep_frac=keep_frac,
-                               epochs=epochs, nstates=nstates, lag=lag, stride=stride,
-                               dt_ps=dt_ps, lat_bits=lat_bits, seed=seed, verbose=verbose)
+    return compress_trajectory([coords], **kw)
 
 
 def print_report(report: dict) -> None:
@@ -251,11 +310,15 @@ def main():
     ap.add_argument("--lag-ns", type=float, default=5.0)
     ap.add_argument("--dt-ps", type=float, default=100.0)
     ap.add_argument("--lat-bits", type=int, default=14)
+    ap.add_argument("--n-bits", type=int, default=4)
+    ap.add_argument("--streaming", action="store_true", help="out-of-core (T5)")
+    ap.add_argument("--chunk", type=int, default=2000)
     ap.add_argument("-o", "--out", default=None, help="write artifact to this .epc path")
     a = ap.parse_args()
     art, report = run_epc(a.top, a.dcd, stride=a.stride, cv_dim=a.cv_dim,
                           keep_frac=a.keep_frac, epochs=a.epochs, nstates=a.nstates,
-                          lag_ns=a.lag_ns, dt_ps=a.dt_ps, lat_bits=a.lat_bits)
+                          lag_ns=a.lag_ns, dt_ps=a.dt_ps, lat_bits=a.lat_bits,
+                          n_bits=a.n_bits, streaming=a.streaming, chunk=a.chunk)
     print_report(report)
     if a.out:
         from .artifact import save_artifact

@@ -50,7 +50,8 @@ def cmd_compress(args):
     art, report = run_epc(
         args.top, args.dcd, stride=args.stride, cv_dim=args.cv_dim,
         keep_frac=args.keep_frac, epochs=args.epochs, nstates=args.nstates,
-        lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits)
+        lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
+        n_bits=args.n_bits, streaming=args.streaming, chunk=args.chunk)
     # method tags (T6-T8 opt-ins; defaults keep the tested baseline)
     art.cv = args.cv
     art.flow_kind = args.flow
@@ -269,6 +270,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--lag-ns", type=float, default=5.0)
     c.add_argument("--dt-ps", type=float, default=100.0)
     c.add_argument("--lat-bits", type=int, default=14)
+    c.add_argument("--n-bits", type=int, default=4, help="residual quantizer bit depth (T4)")
+    c.add_argument("--streaming", action="store_true", help="out-of-core compress (T5)")
+    c.add_argument("--chunk", type=int, default=2000, help="streaming chunk size (frames)")
     # ML opt-ins (defaults = the tested baseline; T6-T8 enable the alternatives)
     c.add_argument("--cv", choices=["tica", "vampnet"], default="tica")
     c.add_argument("--flow", choices=["realnvp", "spline"], default="realnvp")

@@ -334,6 +334,28 @@ class TICA:
     eigvecs_: np.ndarray = field(default=None, repr=False)
     timescales_: np.ndarray = field(default=None, repr=False)
 
+    def _solve(self, c0, ct):
+        """Solve the generalized eigenproblem C(tau) v = C(0) v l and store the
+        leading slow modes. Shared by fit() and finalize()."""
+        from scipy.linalg import eigh
+        evals, evecs = eigh(ct, c0)
+        order = np.argsort(evals)[::-1]
+        evals, evecs = evals[order], evecs[:, order]
+        k = self.n_components or evecs.shape[1]
+        evecs = evecs[:, :k]
+        # Canonicalize eigenvector SIGNS (they are otherwise arbitrary): make the
+        # largest-magnitude component of each mode positive. This makes the CVs --
+        # and therefore the seeded flow / IGFS selection -- DETERMINISTIC and identical
+        # between the batch fit() and the streaming finalize() (whose covariances differ
+        # only by float roundoff), so streaming EPC reproduces the in-RAM result.
+        cols = np.arange(evecs.shape[1])
+        signs = np.sign(evecs[np.argmax(np.abs(evecs), axis=0), cols])
+        signs[signs == 0] = 1.0
+        self.eigvecs_ = evecs * signs
+        with np.errstate(divide='ignore', invalid='ignore'):
+            self.timescales_ = -self.lag / np.log(np.clip(evals[:k], 1e-12, 0.999999))
+        return self
+
     def fit(self, runs: List[np.ndarray]):
         feats = [np.asarray(r, dtype=np.float64) for r in runs]
         allf = np.concatenate(feats, axis=0)
@@ -354,15 +376,51 @@ class TICA:
         ct /= max(nt, 1)
         ct = 0.5 * (ct + ct.T)              # symmetrize (reversibility)
         c0 += 1e-9 * np.eye(c0.shape[0])
-        from scipy.linalg import eigh
-        evals, evecs = eigh(ct, c0)
-        order = np.argsort(evals)[::-1]
-        evals, evecs = evals[order], evecs[:, order]
-        k = self.n_components or evecs.shape[1]
-        self.eigvecs_ = evecs[:, :k]
-        with np.errstate(divide='ignore', invalid='ignore'):
-            self.timescales_ = -self.lag / np.log(np.clip(evals[:k], 1e-12, 0.999999))
+        return self._solve(c0, ct)
+
+    # ----- streaming / out-of-core fitting (T5) -----
+    # Accumulate the SAME C(0), C(tau), mean as fit(), but chunk by chunk, so the CV
+    # step scales past RAM (md.iterload). Cross-chunk lagged pairs are preserved by
+    # carrying the last `lag` frames across calls, so streaming == batch EXACTLY for a
+    # continuous run. Pass run_start=True on the first chunk of each run (resets the
+    # lag buffer so no pair spans a run seam).
+    def partial_fit(self, Y, run_start=False):
+        Y = np.asarray(Y, dtype=np.float64)
+        if not hasattr(self, "_n0"):
+            D = Y.shape[1]
+            self._S0 = np.zeros((D, D)); self._sum0 = np.zeros(D); self._n0 = 0
+            self._St = np.zeros((D, D)); self._suma = np.zeros(D)
+            self._sumb = np.zeros(D); self._nt = 0; self._tail = None
+        self._S0 += Y.T @ Y
+        self._sum0 += Y.sum(axis=0)
+        self._n0 += Y.shape[0]
+        if run_start:
+            self._tail = None
+        ext = Y if self._tail is None else np.concatenate([self._tail, Y], axis=0)
+        if ext.shape[0] > self.lag:
+            a = ext[:-self.lag]; b = ext[self.lag:]
+            self._St += a.T @ b
+            self._suma += a.sum(axis=0); self._sumb += b.sum(axis=0)
+            self._nt += a.shape[0]
+        self._tail = ext[-self.lag:]
         return self
+
+    def finalize(self):
+        """Solve TICA from the streamed moments. Equivalent to fit() on the same data."""
+        n0 = max(self._n0, 1)
+        mean = self._sum0 / n0
+        c0 = self._S0 / n0 - np.outer(mean, mean)
+        nt = max(self._nt, 1)
+        ct = (self._St / nt - np.outer(self._suma / nt, mean)
+              - np.outer(mean, self._sumb / nt) + np.outer(mean, mean))
+        ct = 0.5 * (ct + ct.T)
+        c0 = c0 + 1e-9 * np.eye(c0.shape[0])
+        self.mean_ = mean
+        # free the heavy accumulators once solved
+        out = self._solve(c0, ct)
+        for attr in ("_S0", "_St"):
+            setattr(self, attr, None)
+        return out
 
     def transform(self, Y):
         return (np.asarray(Y, dtype=np.float64) - self.mean_) @ self.eigvecs_
