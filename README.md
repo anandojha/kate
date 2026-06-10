@@ -38,6 +38,9 @@ MSM-as-entropy-coder, and flow-as-density (Boltzmann Generators) are all prior a
 
 ## Results on NTL9 (measured, real trajectory)
 
+> Full narrative: [`docs/METHODS.md`](docs/METHODS.md) — the bound, the method, the
+> resolution accounting, and every measured result with its limitations.
+
 Validated on the 25 µs NTL9 fast-folder, scored **only on the kinetically resolved band**
 (`epc analyze --resolution`; the slow folding mode is sampling-limited and is *not* scored
 — see honesty constraints). All numbers are empirical, with the limits stated.
