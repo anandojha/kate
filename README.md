@@ -141,6 +141,19 @@ invertible and the bound intact; **no lossy CNN autoencoder**):
 - **T6 ✓** learned nonlinear slow CVs via VAMPnets (`--cv vampnet`, deeptime; TICA drop-in)
 - **T7 ✓** more expressive flow (`--flow spline`, rational-quadratic neural-spline
   coupling; tighter density, same invertibility)
+- **T9 ✓ (predictor built; gate pending data)** learned *predictive* entropy coding
+  (`--entropy predictive`, `--predictor {gru,tcn}`) — a **lossy** rate-distortion mode:
+  a causal GRU predicts a conditional Gaussian for the next latent (bound-as-loss:
+  conditional NLL = the transition-kernel surrogate, not MSE), and the **standardized
+  innovation** `(z−μ)/σ` is quantized (subtractive dither) against a unit Gaussian; the
+  bit-width is the rate knob. Streaming-compatible (online GRU state). T8 is kept intact
+  as the lossless head-to-head. **The rate-vs-observable-error gate (CV-KL + MSM
+  timescale error vs the path bound, predictive vs temporal) runs on the
+  trypsin-benzamidine set on the cluster** — built and unit-tested on synthetic latents
+  here; the rate gain over T8 is **empirical**, reported on real data, never assumed.
+  Prior art (cite, verify before paper): DPCM (Cutler 1952); learned hyperprior /
+  autoregressive context models — Ballé et al., ICLR 2018 (arXiv:1802.01436); Minnen
+  et al., NeurIPS 2018 (arXiv:1809.02736).
 
 Defaults stay `--cv tica --flow realnvp --entropy gaussian` so the tested baseline and
 the headline (the kinetic bound) are unchanged; the ML pieces are motivated opt-ins.

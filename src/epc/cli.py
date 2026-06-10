@@ -52,7 +52,7 @@ def cmd_compress(args):
         keep_frac=args.keep_frac, epochs=args.epochs, nstates=args.nstates,
         lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
         n_bits=args.n_bits, streaming=args.streaming, chunk=args.chunk,
-        entropy=args.entropy, flow_kind=args.flow)
+        entropy=args.entropy, flow_kind=args.flow, predictive_kind=args.predictor)
     print_report(report)
     save_artifact(art, args.out)
     print("  artifact written      : %s" % args.out)
@@ -272,7 +272,10 @@ def build_parser() -> argparse.ArgumentParser:
     # ML opt-ins (defaults = the tested baseline; T6-T8 enable the alternatives)
     c.add_argument("--cv", choices=["tica", "vampnet"], default="tica")
     c.add_argument("--flow", choices=["realnvp", "spline"], default="realnvp")
-    c.add_argument("--entropy", choices=["gaussian", "temporal"], default="gaussian")
+    c.add_argument("--entropy", choices=["gaussian", "temporal", "predictive"],
+                   default="gaussian")
+    c.add_argument("--predictor", choices=["gru", "tcn"], default="gru",
+                   help="T9 predictive entropy model (default GRU; streaming-compatible)")
     c.set_defaults(func=cmd_compress)
 
     d = sub.add_parser("decompress", help="artifact -> trajectory (kept frames)")

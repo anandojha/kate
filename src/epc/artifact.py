@@ -63,19 +63,33 @@ class Artifact:
     x_mean: Optional[np.ndarray] = None        # (3N,) mean config in aligned space
     # --- T4 residual stage (added by T4; None until then) ---
     residual: Optional[dict] = None
-    # --- T8 temporal learned-entropy model (None unless entropy == "temporal") ---
+    # --- T8 temporal / T9 predictive learned-entropy models (None unless used) ---
     temporal_arch: Optional[dict] = None
-    # --- flow + temporal weights (torch state_dicts; None when loaded with_flow=False) ---
+    predictive_arch: Optional[dict] = None
+    # --- flow + entropy-model weights (torch state_dicts; None when with_flow=False) ---
     flow_state: Optional[dict] = field(default=None, repr=False)
     temporal_state: Optional[dict] = field(default=None, repr=False)
+    predictive_state: Optional[dict] = field(default=None, repr=False)
 
     def build_temporal(self):
-        """Reconstruct the live TemporalPrior from arch + state (imports torch lazily)."""
+        """Reconstruct the live TemporalPrior (T8) from arch + state (imports torch)."""
         if self.temporal_state is None or self.temporal_arch is None:
             return None
         from .temporal_prior import TemporalPrior
         m = TemporalPrior(**self.temporal_arch)
         m.load_state_dict(self.temporal_state)
+        m.eval()
+        return m
+
+    def build_predictor(self):
+        """Reconstruct the live T9 predictor (GRU/TCN) from arch + state."""
+        if self.predictive_state is None or self.predictive_arch is None:
+            return None
+        from .predictive_coder import make_predictor
+        arch = dict(self.predictive_arch)
+        m = make_predictor(arch["dim"], kind=arch.get("kind", "gru"),
+                           hidden=arch.get("hidden", 64))
+        m.load_state_dict(self.predictive_state)
         m.eval()
         return m
 
@@ -105,7 +119,7 @@ class Artifact:
 # config.json holds only JSON-friendly scalars/lists/strings.
 _CONFIG_KEYS = ("cv_dim", "L", "zmax", "n_keep", "run_lengths", "n_states", "lag",
                 "stride", "dt_ps", "dt_strided_ns", "flow_arch", "cv", "flow_kind",
-                "entropy", "temporal_arch")
+                "entropy", "temporal_arch", "predictive_arch")
 
 
 def save_artifact(art: Artifact, path: str) -> str:
@@ -141,6 +155,9 @@ def save_artifact(art: Artifact, path: str) -> str:
     if art.temporal_state is not None:
         import torch
         torch.save(art.temporal_state, os.path.join(path, "temporal.pt"))
+    if art.predictive_state is not None:
+        import torch
+        torch.save(art.predictive_state, os.path.join(path, "predictive.pt"))
     return path
 
 
@@ -169,6 +186,10 @@ def load_artifact(path: str, with_flow: bool = True) -> Artifact:
     if with_flow and os.path.exists(os.path.join(path, "temporal.pt")):
         import torch
         temporal_state = torch.load(os.path.join(path, "temporal.pt"), weights_only=True)
+    predictive_state = None
+    if with_flow and os.path.exists(os.path.join(path, "predictive.pt")):
+        import torch
+        predictive_state = torch.load(os.path.join(path, "predictive.pt"), weights_only=True)
 
     return Artifact(
         cv_dim=int(cfg["cv_dim"]), L=int(cfg["L"]), zmax=float(cfg["zmax"]),
@@ -190,5 +211,6 @@ def load_artifact(path: str, with_flow: bool = True) -> Artifact:
         x_mean=npz["x_mean"] if "x_mean" in npz.files else None,
         residual=residual,
         temporal_arch=cfg.get("temporal_arch"), temporal_state=temporal_state,
+        predictive_arch=cfg.get("predictive_arch"), predictive_state=predictive_state,
         flow_state=flow_state,
     )

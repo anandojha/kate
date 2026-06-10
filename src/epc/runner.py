@@ -49,7 +49,7 @@ def kl_1d(p, q, bins):
 
 def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, epochs,
                        nstates, lag, stride, dt_ps, lat_bits, n_bits, seed, verbose,
-                       entropy="gaussian", flow_kind="realnvp"):
+                       entropy="gaussian", flow_kind="realnvp", predictive_kind="gru"):
     """Shared post-CV core: flow density -> IGFS -> entropy code -> retained MSM ->
     path bound -> full-atom residual -> Artifact. ``fetch_kept(global_indices)``
     returns the aligned flat coords (n_keep, 3N) for the kept frames (in-RAM slice for
@@ -138,7 +138,9 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
 
     # --- T8: temporal learned-entropy model (rate WITH vs WITHOUT, over all frames) ---
     temporal_arch = temporal_state = None
+    predictive_arch = predictive_state = None
     rate_gaussian_bpv = rate_temporal_bpv = None
+    rd_curve = pred_cond_nll = pred_static_nll = None
     if entropy == "temporal":
         from .temporal_prior import (TemporalPrior, gaussian_rate_bits_per_value,
                                      temporal_rate_bits_per_value)
@@ -150,6 +152,24 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         rate_gaussian_bpv = gaussian_rate_bits_per_value(z_all, L, zmax)
         rate_temporal_bpv = temporal_rate_bits_per_value(z_all, tmodel, L, zmax)
         temporal_state = {k: v.detach().cpu() for k, v in tmodel.state_dict().items()}
+    elif entropy == "predictive":
+        # T9: LOSSY learned predictive coding. Train the causal predictor (bound-as-loss
+        # conditional NLL), report the rate-distortion curve + the no-predictor floor.
+        # The TRUE rate-vs-observable-error gate (vs T8) runs on the trypsin set.
+        from .predictive_coder import (make_predictor, rate_distortion_curve,
+                                       conditional_nll, static_gaussian_nll)
+        from .temporal_prior import gaussian_rate_bits_per_value
+        if verbose:
+            print("  training %s predictor on the %d-frame latent sequence ..."
+                  % (predictive_kind, T_total))
+        pmodel = make_predictor(cv_dim, kind=predictive_kind, hidden=64)
+        pmodel.fit(z_all, epochs=max(100, epochs // 2), verbose=False, seed=seed)
+        predictive_arch = {"dim": cv_dim, "kind": predictive_kind, "hidden": 64}
+        predictive_state = {k: v.detach().cpu() for k, v in pmodel.state_dict().items()}
+        rd_curve = rate_distortion_curve(z_all, pmodel, [4, 6, 8, 10, 12], seed=seed)
+        pred_cond_nll = conditional_nll(pmodel, z_all)
+        pred_static_nll = static_gaussian_nll(z_all)
+        rate_gaussian_bpv = gaussian_rate_bits_per_value(z_all, L, zmax)
 
     artifact = Artifact(
         cv_dim=cv_dim, L=L, zmax=zmax, n_keep=len(kept),
@@ -163,6 +183,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         tica_timescales=cv_meta.get("tica_timescales"),
         align_ref=ref, x_mean=cv_meta.get("x_mean"), residual=residual,
         temporal_arch=temporal_arch, temporal_state=temporal_state,
+        predictive_arch=predictive_arch, predictive_state=predictive_state,
         flow_state={k: v.detach().cpu() for k, v in flow.state_dict().items()},
     )
     flow_bytes = sum(p.numel() for p in flow.parameters()) * 4
@@ -178,6 +199,8 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         "kinetic_bound": kin, "entropy": entropy, "cv": cv_meta["cv"],
         "vamp_score": cv_meta.get("vamp_score"),
         "rate_gaussian_bpv": rate_gaussian_bpv, "rate_temporal_bpv": rate_temporal_bpv,
+        "rd_curve": rd_curve, "pred_cond_nll": pred_cond_nll,
+        "pred_static_nll": pred_static_nll, "predictive_kind": predictive_kind,
     }
     return artifact, report
 
@@ -206,7 +229,8 @@ def _vampnet_cvs(aligned, lag, cv_dim, x_mean, epochs, seed, verbose):
 def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", cv_dim=6,
                         keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
                         dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
-                        entropy="gaussian", flow_kind="realnvp") -> Tuple[Artifact, dict]:
+                        entropy="gaussian", flow_kind="realnvp",
+                        predictive_kind="gru") -> Tuple[Artifact, dict]:
     """In-RAM, run-aware flow-based EPC on a list of (T_i, N, 3) arrays (nm). ``cv`` is
     the collective-variable method: 'tica' (linear, default) or 'vampnet' (T6)."""
     ref = None
@@ -224,13 +248,15 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", cv_dim=6,
                               cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
                               lat_bits=lat_bits, n_bits=n_bits, seed=seed,
-                              verbose=verbose, entropy=entropy, flow_kind=flow_kind)
+                              verbose=verbose, entropy=entropy, flow_kind=flow_kind,
+                              predictive_kind=predictive_kind)
 
 
 def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_dim=6,
                        keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
                        dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
-                       entropy="gaussian", flow_kind="realnvp") -> Tuple[Artifact, dict]:
+                       entropy="gaussian", flow_kind="realnvp",
+                       predictive_kind="gru") -> Tuple[Artifact, dict]:
     """T5: out-of-core EPC. ``chunk_factory()`` returns a FRESH iterator of (T_c, N, 3)
     coordinate chunks (e.g. from md.iterload). The trajectory is treated as ONE
     continuous run; the whole thing is never held in RAM -- only the small CVs and the
@@ -291,13 +317,15 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
                               cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
                               lat_bits=lat_bits, n_bits=n_bits, seed=seed,
-                              verbose=verbose, entropy=entropy, flow_kind=flow_kind)
+                              verbose=verbose, entropy=entropy, flow_kind=flow_kind,
+                              predictive_kind=predictive_kind)
 
 
 def run_epc(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.10,
             epochs=300, nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, n_bits=4,
             seed=0, streaming=False, chunk=2000, entropy="gaussian",
-            flow_kind="realnvp", verbose=True) -> Tuple[Artifact, dict]:
+            flow_kind="realnvp", predictive_kind="gru",
+            verbose=True) -> Tuple[Artifact, dict]:
     """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based EPC.
     ``cv`` = 'tica' (default) or 'vampnet' (T6). ``streaming=True`` uses the out-of-core
     path (chunked md.iterload; TICA only)."""
@@ -317,7 +345,8 @@ def run_epc(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.1
     sel = heavy_indices(topo)
     kw = dict(cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs, nstates=nstates,
               lag=lag, stride=stride, dt_ps=dt_ps, lat_bits=lat_bits, n_bits=n_bits,
-              seed=seed, verbose=verbose, entropy=entropy, flow_kind=flow_kind)
+              seed=seed, verbose=verbose, entropy=entropy, flow_kind=flow_kind,
+              predictive_kind=predictive_kind)
     if streaming:
         def factory():
             return (np.asarray(ch.xyz, dtype=np.float64) for ch in
@@ -364,6 +393,19 @@ def print_report(report: dict) -> None:
                  "saved" if rt <= rg else "WORSE -- no inter-frame redundancy here"))
         print("  NOTE: the flow already Gaussianizes per frame; T8 exploits only INTER-")
         print("  frame redundancy -- at 100 ps spacing the real-data gain may be modest.")
+    if r.get("rd_curve") is not None:
+        print("PREDICTIVE LEARNED-ENTROPY CODING (T9; LOSSY, %s predictor)" % r["predictive_kind"])
+        print("  conditional NLL / static N(0,1) NLL : %.3f / %.3f nats  (predictor gain %.2f)"
+              % (r["pred_cond_nll"], r["pred_static_nll"],
+                 r["pred_static_nll"] - r["pred_cond_nll"]))
+        if r.get("rate_gaussian_bpv") is not None:
+            print("  static lossless floor               : %.3f bits/value" % r["rate_gaussian_bpv"])
+        print("  rate-distortion curve (bits/value @ latent MSE):")
+        for c in r["rd_curve"]:
+            print("     %2d-bit : %6.3f bits/value   latent MSE %.2e"
+                  % (c["bits"], c["rate_bpv"], c["latent_mse"]))
+        print("  NOTE: rate gain over T8 is EMPIRICAL -- the rate-vs-observable-error gate")
+        print("  (CV-KL, MSM timescale error, vs the path bound) runs on the trypsin set.")
     print("KINETICS (MSM dynamics term)")
     print("  implied timescales    : %s ns" % np.round(r["implied_timescales_ns"], 1))
     print("KINETIC BOUND (path-distribution; retained Q vs reference P = full-data MSM)")
