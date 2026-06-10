@@ -124,23 +124,28 @@ MSM + lag scan** (`epc analyze`, version-stable) and, for nonlinear slow CVs, fr
 **VAMPnets [T6]** on **ligand-pocket contacts** (not raw Cartesian). The bound, the
 flow, the EPC pipeline, and the thermodynamics (state populations) are unaffected.
 
-## Build targets (status)
+## Build targets (all implemented)
 
 Classical / scaling track — `RECIPE.txt` §4:
-- **T1** wire the path bound into the runner + `epc bound`
-- **T2** production kinetics via deeptime (`epc analyze`: lag scan, Bayesian bars)
-- **T3** baseline-comparison harness (`epc benchmark`, the contrast figure)
-- **T4** full-atom reconstruction (per-state dithered residual stage)
-- **T5** scale to 419k→1M frames (streaming TICA, two-pass encode)
+- **T1 ✓** path bound wired into the runner + `epc bound` (pure-numpy contrast scorer)
+- **T2 ✓** production kinetics via deeptime (`epc analyze`: lag scan, Bayesian bars)
+- **T3 ✓** baseline-comparison harness (`epc benchmark`, the contrast figure)
+- **T4 ✓** full-atom reconstruction (`decompress --full-atom`, per-state dithered residual)
+- **T5 ✓** scale to 419k→1M frames (`compress --streaming`, streaming TICA, multi-pass)
 
-Neural-ML track — `RECIPE.txt` §4b (implemented in order **T8 → T6 → T7**, keeping
-the flow invertible and the bound intact; **no lossy CNN autoencoder**):
-- **T8** temporal + learned-entropy model — codes latents against a causal learned
-  conditional instead of a fixed Gaussian base; changes only the *code length*, not
-  the flow or the bound. *The defensibly-novel ML piece.*
-- **T6** learned slow CVs via VAMPnets (nonlinear, TICA drop-in)
-- **T7** more expressive flow (neural-spline / MAF coupling; tighter bound, same
-  invertibility)
+Neural-ML track — `RECIPE.txt` §4b (built in order **T8 → T6 → T7**, the flow stays
+invertible and the bound intact; **no lossy CNN autoencoder**):
+- **T8 ✓** temporal + learned-entropy model (`--entropy temporal`) — codes latents
+  against a causal learned conditional instead of the fixed N(0,I) base; changes only
+  the *code length*, not the flow or the bound (exactly lossless). *The novel-ML piece.*
+- **T6 ✓** learned nonlinear slow CVs via VAMPnets (`--cv vampnet`, deeptime; TICA drop-in)
+- **T7 ✓** more expressive flow (`--flow spline`, rational-quadratic neural-spline
+  coupling; tighter density, same invertibility)
+
+Defaults stay `--cv tica --flow realnvp --entropy gaussian` so the tested baseline and
+the headline (the kinetic bound) are unchanged; the ML pieces are motivated opt-ins.
+The full test suite (`pytest`) is green; torch/deeptime-dependent tests auto-skip when
+those libraries are absent.
 
 ## Repository layout
 
