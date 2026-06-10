@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "epc"
+version = "0.1.0"
+description = "Ensemble-Preserving Compression of MD trajectories, with a kinetic (path-distribution) fidelity bound"
+readme = "README.md"
+requires-python = ">=3.9"
+# License intentionally left UNSPECIFIED here (decide before any public release).
+# We import third-party libraries and reimplement algorithms from their papers; we
+# do not vendor anyone's source, so no third-party license is inherited. See README
+# "Citation vs license compliance".
+authors = [{ name = "A. Ojha" }]
+keywords = [
+    "molecular-dynamics", "compression", "markov-state-model",
+    "normalizing-flow", "kinetics", "trajectory",
+]
+
+# Core: enough to run `epc compress`, `epc decompress`, and `epc bound`.
+# torch is core because the normalizing flow needs it.
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-learn>=1.3",
+    "torch>=2.0",
+    "mdtraj>=1.9",
+]
+
+[project.optional-dependencies]
+# Rigorous kinetics engine. Only `epc analyze`, `epc benchmark`, and the T6 VAMPnet
+# path import deeptime; the guards raise `pip install epc[kinetics]` when absent.
+kinetics = ["deeptime>=0.4.4", "matplotlib>=3.5"]
+# Test tooling.
+test = ["pytest>=7.0"]
+# Optional alternative spline-flow implementation for the T7 comparison.
+nflows = ["nflows>=0.14"]
+
+[project.scripts]
+epc = "epc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

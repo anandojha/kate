@@ -1,0 +1,24 @@
+# EPC -- Python dependencies (convenience mirror of pyproject.toml).
+# Preferred install:  pip install -e ".[kinetics,test]"
+# Versions below are floors; the code is developed/tested against newer wheels too.
+
+# --- core (epc compress / decompress / bound run on these alone) ---
+numpy>=1.24
+scipy>=1.10
+scikit-learn>=1.3
+torch>=2.0            # the normalizing flow needs torch; CPU build is fine for demos
+mdtraj>=1.9           # trajectory I/O (DCD); OpenMM ecosystem
+
+# --- optional extra [kinetics]: analyze / benchmark / VAMPnet (T6) ---
+# Imported, never vendored. Install with: pip install -e ".[kinetics]"
+deeptime>=0.4.4       # production MSM/TICA/VAMP/VAMPnets (kinetics_deeptime.py)
+matplotlib>=3.5       # benchmark contrast plot
+
+# --- optional extra [test] ---
+pytest>=7.0
+
+# --- external baselines (NOT pip dependencies; build/run in their own envs,
+#     invoked as subprocesses for the T3 benchmark; see RELATED_WORK.txt) ---
+# MDZip   : git clone https://github.com/PDNALab/MDZip      (torch + pytorch-lightning)
+# SZ3     : https://github.com/szcompressor/SZ3             (C/C++ build; current gen)
+# ZFP     : https://github.com/LLNL/zfp                     (C/C++ build)

@@ -1,0 +1,44 @@
+# --- third-party reference clones / baselines (NOT our code; never committed) ---
+# Kept on disk for reference/baseline runs; excluded from the repo per RECIPE §6.
+MDZip/
+SZ3/
+zfp/
+deeptime/
+bgflow/
+bgmol/
+awesome-AI4MolConformation-MD/
+
+# --- the pre-migration flat package (removed after equivalence is verified) ---
+epc_package/
+
+# --- Python environment / build ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+
+# --- EPC artifacts / experiment outputs ---
+*.epc/
+*.epc
+benchmark_*.png
+benchmark_*.csv
+
+# --- test / tooling caches ---
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- editors / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp

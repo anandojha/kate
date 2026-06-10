@@ -1,0 +1,128 @@
+================================================================================
+RELATED WORK -- repositories, papers, and how each one relates to EPC
+================================================================================
+Confidence is flagged per item. Links marked [VERIFIED] were opened/seen during
+the literature recon; [UNVERIFIED] means I could not confirm the exact URL --
+check it before relying on it. I have NOT invented any URL or DOI.
+
+YOUR LOCAL FOLDERS (downloaded into compression_project/):
+  MDZip/                         -> COMPETITOR (run as baseline)
+  deeptime/                      -> TOOL (but prefer `pip install deeptime`)
+  bgflow/ , bgmol/               -> REFERENCE (cite; optional sanity check)
+  SZ3/ , zfp/                    -> BASELINES (C/C++; build per their READMEs)
+  awesome-AI4MolConformation-MD/ -> survey list
+  epc_package/                   -> OUR code (the thing being built)
+
+Roles:  [COMPETITOR] differentiate against    [BASELINE] run for comparison
+        [TOOL] reuse as a dependency           [REFERENCE] cite / sanity-check
+
+--------------------------------------------------------------------------------
+[COMPETITOR]  MDZip   (the closest prior work -- and at YOUR conference)
+--------------------------------------------------------------------------------
+  repo  : https://github.com/PDNALab/MDZip                         [VERIFIED]
+  paper : J. Phys. Chem. B 2025, 129, 45, 11702-11716
+          doi: 10.1021/acs.jpcb.5c05348
+  preprint (bioRxiv): 10.1101/2025.07.31.667955
+  group : Alberto Perez lab, U Florida (author: Namindu De Silva)
+  ACS   : Spring 2026, poster #198 -- presenting alongside your talk.
+  what  : per-system convolutional autoencoder (AE + residual/skip variant),
+          latent dim ~20, reconstructs full atomic coordinates, >95% storage
+          reduction. Validates ensemble features (RMSD fluctuations, pairwise
+          distances, Rg, PCA/TICA PROJECTIONS). Physics-agnostic, lossy.
+  gap   : NO error bound; validates the *static* TICA-projection distribution,
+          NOT transition rates / kinetics. This is exactly EPC's wedge.
+  license: none seen in repo -> VERIFY before any reuse. (Read for ideas; do
+           not vendor.)
+  runnable: yes -- compress(traj, top, ...) / decompress(top, model, compressed,
+            out). Deps: torch, pytorch-lightning, mdtraj, scikit-learn.
+
+--------------------------------------------------------------------------------
+[COMPETITOR]  JCIM autoencoder   (Mondal group)
+--------------------------------------------------------------------------------
+  paper : "Employing Artificial Neural Networks for Optimal Storage and Facile
+          Sharing of Molecular Dynamics Simulation Trajectories",
+          J. Chem. Inf. Model. 2025, 65, 17, 9022-9033
+          doi: 10.1021/acs.jcim.5c01294
+  preprint (bioRxiv): 10.1101/2024.09.15.613125
+  what  : per-frame autoencoder into a latent space; up to 98% disk savings vs
+          XTC; coordinate-reconstruction focused; tested on folded proteins,
+          IDPs, bilayers, protein-ligand complexes.
+  gap   : same as MDZip -- coordinate/ensemble reconstruction, no bound, no
+          kinetic guarantee.
+  repo  : NOT located during recon                                  [UNVERIFIED]
+          -> check the paper's SI / the Mondal group GitHub if you want their code.
+
+--------------------------------------------------------------------------------
+[TOOL]  deeptime   (use this; it solves two of our open problems)
+--------------------------------------------------------------------------------
+  repo  : https://github.com/deeptime-ml/deeptime                  [VERIFIED]
+  docs  : https://deeptime-ml.github.io
+  paper : Hoffmann et al., "Deeptime: a Python library for machine learning
+          dynamical models from time series data", Mach. Learn.: Sci. Technol.
+          (2022). doi: 10.1088/2632-2153/ac3de0
+  what  : MSMs, HMMs, Koopman, TICA/VAMP, VAMPnets, deep MSMs. scikit-learn-like.
+  why   : (1) reversible MAXIMUM-LIKELIHOOD MSM + implied-timescale convergence +
+          BayesianMSM error bars -> replaces the crude (C+C^T)/2 estimator in
+          kinetic_codec for the numbers you publish.
+          (2) TICA/VAMP use an ONLINE covariance estimator (partial_fit) -> the
+          CV step streams, so it scales past RAM to your 419k -> 1M frames.
+          (3) VAMPnets if you later want nonlinear slow CVs.
+  status: wrapped + tested in this package as kinetics_deeptime.py (against
+          deeptime 0.4.5). Re-check the API if you upgrade.
+
+--------------------------------------------------------------------------------
+[REFERENCE]  bgflow / bgmol   (Boltzmann Generators -- the flow prior art)
+--------------------------------------------------------------------------------
+  repo  : https://github.com/noegroup/bgflow   (MIT)               [VERIFIED]
+  data  : https://github.com/noegroup/bgmol                        [VERIFIED]
+  paper : Noe, Olsson, Koehler, Wu, "Boltzmann generators: Sampling equilibrium
+          states of many-body systems with deep learning", Science 365 (2019).
+  what  : PyTorch Boltzmann Generators / normalizing flows; affine-coupling
+          building blocks (the same primitives epc_flow.py implements).
+  use   : cite as the flow-as-molecular-density prior art; optionally sanity-
+          check epc_flow against it. It is ALPHA with a shifting API, so keep
+          your from-scratch epc_flow.py as the reproducible implementation.
+
+--------------------------------------------------------------------------------
+[BASELINE]  SZ3   (error-bounded scientific compressor -- current generation)
+--------------------------------------------------------------------------------
+  repo  : https://github.com/szcompressor/SZ3                      [VERIFIED]
+          (this is the one you downloaded; SZ3 supersedes the older SZ/SZ2)
+  what  : pointwise error-bounded lossy compression for floating-point arrays
+          (CMake/C++; has Python bindings -- check its README for the current
+          install/usage, do not assume the API). MDZ (Zhao et al., ICDE 2022) is
+          the MD-specialized variant from this lineage with QoI control.
+  role  : the "pointwise-bounded but kinetically blind" baseline -- bounds
+          per-coordinate error, says nothing about transition rates. Compress the
+          trypsin DCD, reconstruct, re-estimate the MSM, show kinetics drift.
+
+--------------------------------------------------------------------------------
+[BASELINE]  ZFP   (error-bounded / fixed-rate array compressor)
+--------------------------------------------------------------------------------
+  repo  : https://github.com/LLNL/zfp                              [VERIFIED-ish]
+          (well-known LLNL repo; confirm before scripting)
+  role  : same family/role as SZ; a second pointwise-bounded baseline.
+
+--------------------------------------------------------------------------------
+[BASELINE]  MDCompress / plain XTC   (classical coordinate codecs)
+--------------------------------------------------------------------------------
+  MDCompress preprint (bioRxiv): 10.64898/2025.12.19.695527        [VERIFIED-doi]
+            ~15-37% smaller than XTC, prediction-based, random access.
+  repo    : NOT confirmed                                          [UNVERIFIED]
+  XTC     : GROMACS fixed-precision lossy format -- the "current practice" ratio
+            baseline everyone compares to.
+
+--------------------------------------------------------------------------------
+[REFERENCE]  awesome-AI4MolConformation-MD   (curated field survey)
+--------------------------------------------------------------------------------
+  repo  : https://github.com/AspirinCode/awesome-AI4MolConformation-MD [VERIFIED]
+  what  : maintained list of ML/generative methods for MD conformations, with
+          code links -- handy for a fuller related-work sweep.
+
+================================================================================
+ONE-LINE SUMMARY OF THE LANDSCAPE (the thing the paper leans on):
+  Every neural MD compressor (MDZip, JCIM AE) reconstructs coordinates/ensembles
+  with NO bound and NO kinetic guarantee; the error-bounded ones (SZ/ZFP/MDZ)
+  bound coordinates/QoI, NOT kinetics. EPC's kinetic-observable guarantee (the
+  path-distribution bound) is the unoccupied spot.
+================================================================================
