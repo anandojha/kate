@@ -47,13 +47,15 @@ def kl_1d(p, q, bins):
     return float((a * np.log(a / b)).sum())
 
 
-def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epochs,
+def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, epochs,
                        nstates, lag, stride, dt_ps, lat_bits, n_bits, seed, verbose,
                        entropy="gaussian"):
     """Shared post-CV core: flow density -> IGFS -> entropy code -> retained MSM ->
     path bound -> full-atom residual -> Artifact. ``fetch_kept(global_indices)``
     returns the aligned flat coords (n_keep, 3N) for the kept frames (in-RAM slice for
-    the batch path; a streamed read for the out-of-core path)."""
+    the batch path; a streamed read for the out-of-core path). ``cv_meta`` carries the
+    CV-method metadata (TICA params / VAMP score / cv tag) -- the reconstruction itself
+    is CV-AGNOSTIC (a fitted linear decoder), so this works for TICA or VAMPnet CVs."""
     dt_strided_ns = stride * dt_ps / 1000.0
     CV_all = np.concatenate(CV_runs, axis=0).astype(np.float32)
     run_lengths = [c.shape[0] for c in CV_runs]
@@ -101,11 +103,16 @@ def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epo
     its_ns = its * dt_strided_ns
     kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # EPC: Q==P
 
-    # --- T4: full-atom residual stage (fast modes TICA discards) ---
+    # --- T4: full-atom residual stage (CV-AGNOSTIC linear decoder + dithered residual) ---
+    # A linear CV->coordinate decoder fit on the KEPT frames maps the decoded CV back to
+    # 3N; the residual recovers what that linear map misses. Works for ANY CVs (TICA or
+    # VAMPnet) and needs only the kept frames (streaming-friendly).
     labels_all = np.concatenate(labels)
-    Vp = np.linalg.pinv(tica.eigvecs_)
     X_kept = np.asarray(fetch_kept(kept), dtype=np.float64)          # (n_keep, 3N) aligned
-    X_approx_kept = tica.mean_ + cv_rec @ Vp
+    xmean = X_kept.mean(axis=0)
+    cmean = cv_rec.mean(axis=0)
+    Bdec, *_ = np.linalg.lstsq(cv_rec - cmean, X_kept - xmean, rcond=None)   # (cv_dim, 3N)
+    X_approx_kept = (cv_rec - cmean) @ Bdec + xmean
     R_kept = X_kept - X_approx_kept
     labels_kept = labels_all[kept]
     D = X_kept.shape[1]
@@ -118,7 +125,7 @@ def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epo
     rq = rcodec.quantize(resid, rstep)
     residual = {"state_mean_R": state_mean_R, "q": rq, "step": rstep,
                 "n_bits": n_bits, "seed": seed, "labels_kept": labels_kept,
-                "n_atoms": D // 3}
+                "n_atoms": D // 3, "B": Bdec, "cmean": cmean, "xmean": xmean}
     full_rec = X_approx_kept + rcodec.dequantize(rq, rstep) + state_mean_R[labels_kept]
     fullatom_rmsd = float(np.sqrt(((full_rec - X_kept) ** 2)
                                   .reshape(len(kept), -1, 3).sum(2).mean()))
@@ -145,10 +152,10 @@ def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epo
         T_msm=T_msm, n_states=nstates, lag=lag,
         stride=stride, dt_ps=dt_ps, dt_strided_ns=dt_strided_ns,
         flow_arch={"dim": cv_dim, "hidden": 64, "n_layers": 10},
-        cv="tica", flow_kind="realnvp", entropy=entropy,
-        tica_mean=tica.mean_, tica_eigvecs=tica.eigvecs_,
-        tica_timescales=tica.timescales_,
-        align_ref=ref, x_mean=tica.mean_, residual=residual,
+        cv=cv_meta["cv"], flow_kind="realnvp", entropy=entropy,
+        tica_mean=cv_meta.get("tica_mean"), tica_eigvecs=cv_meta.get("tica_eigvecs"),
+        tica_timescales=cv_meta.get("tica_timescales"),
+        align_ref=ref, x_mean=cv_meta.get("x_mean"), residual=residual,
         temporal_arch=temporal_arch, temporal_state=temporal_state,
         flow_state={k: v.detach().cpu() for k, v in flow.state_dict().items()},
     )
@@ -162,29 +169,52 @@ def _assemble_artifact(CV_runs, fetch_kept, tica, ref, *, cv_dim, keep_frac, epo
         "residual_bits": int(rq.size) * n_bits, "state_mean_bits": int(state_mean_R.size) * 32,
         "flow_bytes": flow_bytes, "coded_bytes": len(coded),
         "implied_timescales_ns": its_ns, "lag": lag, "dt_strided_ns": dt_strided_ns,
-        "kinetic_bound": kin, "entropy": entropy,
+        "kinetic_bound": kin, "entropy": entropy, "cv": cv_meta["cv"],
+        "vamp_score": cv_meta.get("vamp_score"),
         "rate_gaussian_bpv": rate_gaussian_bpv, "rate_temporal_bpv": rate_temporal_bpv,
     }
     return artifact, report
 
 
-def compress_trajectory(coords_runs: List[np.ndarray], *, cv_dim=6, keep_frac=0.10,
-                        epochs=300, nstates=200, lag=10, stride=1, dt_ps=100.0,
-                        lat_bits=14, n_bits=4, seed=0, verbose=True,
+def _tica_cvs(aligned, lag, cv_dim, x_mean, verbose):
+    tica = TICA(lag=lag, n_components=cv_dim).fit(aligned)
+    CV_runs = [tica.transform(a) for a in aligned]
+    if verbose:
+        print("  TICA CVs              : %d-D   leading timescales (frames): %s"
+              % (cv_dim, np.round(tica.timescales_[:cv_dim], 1)))
+    cv_meta = {"cv": "tica", "tica_mean": tica.mean_, "tica_eigvecs": tica.eigvecs_,
+               "tica_timescales": tica.timescales_, "x_mean": tica.mean_,
+               "vamp_score": None}
+    return CV_runs, cv_meta
+
+
+def _vampnet_cvs(aligned, lag, cv_dim, x_mean, epochs, seed, verbose):
+    from .vampnet_cv import vampnet_cvs
+    _, CV_runs, score = vampnet_cvs(aligned, lag, cv_dim, n_epochs=max(20, epochs // 4),
+                                    seed=seed, verbose=verbose)
+    cv_meta = {"cv": "vampnet", "tica_mean": None, "tica_eigvecs": None,
+               "tica_timescales": None, "x_mean": x_mean, "vamp_score": score}
+    return CV_runs, cv_meta
+
+
+def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", cv_dim=6,
+                        keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
+                        dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                         entropy="gaussian") -> Tuple[Artifact, dict]:
-    """In-RAM, run-aware flow-based EPC on a list of (T_i, N, 3) arrays (nm)."""
+    """In-RAM, run-aware flow-based EPC on a list of (T_i, N, 3) arrays (nm). ``cv`` is
+    the collective-variable method: 'tica' (linear, default) or 'vampnet' (T6)."""
     ref = None
     aligned = []
     for r in coords_runs:
         a, ref = kabsch_align(np.asarray(r, dtype=np.float64), ref)
         aligned.append(a.reshape(a.shape[0], -1))
     X_all = np.concatenate(aligned, axis=0)
-    tica = TICA(lag=lag, n_components=cv_dim).fit(aligned)
-    CV_runs = [tica.transform(a) for a in aligned]
-    if verbose:
-        print("  TICA CVs              : (%d, %d)   leading timescales (frames): %s"
-              % (X_all.shape[0], cv_dim, np.round(tica.timescales_[:cv_dim], 1)))
-    return _assemble_artifact(CV_runs, lambda idx: X_all[idx], tica, ref,
+    x_mean = X_all.mean(axis=0)
+    if cv == "vampnet":
+        CV_runs, cv_meta = _vampnet_cvs(aligned, lag, cv_dim, x_mean, epochs, seed, verbose)
+    else:
+        CV_runs, cv_meta = _tica_cvs(aligned, lag, cv_dim, x_mean, verbose)
+    return _assemble_artifact(CV_runs, lambda idx: X_all[idx], cv_meta, ref,
                               cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
                               lat_bits=lat_bits, n_bits=n_bits, seed=seed,
@@ -248,26 +278,33 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
 
     if verbose:
         print("  [pass 3] residual for kept frames (streamed) ...")
-    return _assemble_artifact([CV_all], fetch_kept, tica, ref,
+    cv_meta = {"cv": "tica", "tica_mean": tica.mean_, "tica_eigvecs": tica.eigvecs_,
+               "tica_timescales": tica.timescales_, "x_mean": tica.mean_,
+               "vamp_score": None}
+    return _assemble_artifact([CV_all], fetch_kept, cv_meta, ref,
                               cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
                               lat_bits=lat_bits, n_bits=n_bits, seed=seed,
                               verbose=verbose, entropy=entropy)
 
 
-def run_epc(top: str, dcd: str, *, stride=10, cv_dim=6, keep_frac=0.10, epochs=300,
-            nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, n_bits=4, seed=0,
-            streaming=False, chunk=2000, entropy="gaussian",
+def run_epc(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.10,
+            epochs=300, nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, n_bits=4,
+            seed=0, streaming=False, chunk=2000, entropy="gaussian",
             verbose=True) -> Tuple[Artifact, dict]:
     """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based EPC.
-    ``streaming=True`` uses the out-of-core path (chunked md.iterload)."""
+    ``cv`` = 'tica' (default) or 'vampnet' (T6). ``streaming=True`` uses the out-of-core
+    path (chunked md.iterload; TICA only)."""
     import mdtraj as md
+    if streaming and cv == "vampnet":
+        raise SystemExit("--cv vampnet is not supported with --streaming (the VAMPNet "
+                         "needs its features in RAM). Use the in-RAM path.")
     dt_strided_ns = stride * dt_ps / 1000.0
     lag = max(1, int(round(lag_ns / dt_strided_ns)))
     if verbose:
         print("=" * 70)
-        print("EPC on %s  (stride %d -> %.3f ns/frame, lag %d frames = %.2f ns%s)"
-              % (dcd, stride, dt_strided_ns, lag, lag * dt_strided_ns,
+        print("EPC on %s  (stride %d -> %.3f ns/frame, lag %d frames = %.2f ns; cv=%s%s)"
+              % (dcd, stride, dt_strided_ns, lag, lag * dt_strided_ns, cv,
                  ", STREAMING" if streaming else ""))
         print("=" * 70)
     topo = md.load_topology(top)
@@ -286,13 +323,17 @@ def run_epc(top: str, dcd: str, *, stride=10, cv_dim=6, keep_frac=0.10, epochs=3
     coords = np.concatenate(chunks, 0)
     if verbose:
         print("  loaded                : %s (nm), %d heavy atoms" % (coords.shape, len(sel)))
-    return compress_trajectory([coords], **kw)
+    return compress_trajectory([coords], cv=cv, **kw)
 
 
 def print_report(report: dict) -> None:
     r = report
     kin = r["kinetic_bound"]
     print("-" * 70)
+    if r.get("vamp_score") is not None:
+        print("COLLECTIVE VARIABLES  : VAMPnet (T6), VAMP2 score = %.3f" % r["vamp_score"])
+    else:
+        print("COLLECTIVE VARIABLES  : TICA (linear)")
     print("ENSEMBLE FIDELITY (flow vs data)")
     print("  KL(data||flow) on CV1 : %.4f nats" % r["kl_cv1_nats"])
     print("  bounded-obs |diff|    : %.4f   <= Pinsker sqrt(KL/2)=%.4f : %s"

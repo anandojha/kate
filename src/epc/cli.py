@@ -48,13 +48,12 @@ def cmd_compress(args):
     from .runner import run_epc, print_report
     from .artifact import save_artifact
     art, report = run_epc(
-        args.top, args.dcd, stride=args.stride, cv_dim=args.cv_dim,
+        args.top, args.dcd, stride=args.stride, cv=args.cv, cv_dim=args.cv_dim,
         keep_frac=args.keep_frac, epochs=args.epochs, nstates=args.nstates,
         lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
         n_bits=args.n_bits, streaming=args.streaming, chunk=args.chunk,
         entropy=args.entropy)
-    # CV / flow opt-in tags (T6 / T7 wire the alternatives; entropy is handled above)
-    art.cv = args.cv
+    # flow opt-in tag (T7 wires the spline alternative; cv/entropy handled above)
     art.flow_kind = args.flow
     print_report(report)
     save_artifact(art, args.out)
@@ -81,11 +80,10 @@ def cmd_decompress(args):
     print("  kept frames           : %d  (CV-space, %d-D)" % (art.n_keep, art.cv_dim))
 
     if args.full_atom and art.residual is not None:
-        # T4: CV reconstructs the SLOW modes; the residual stage adds back the fast
-        # modes -> full 3N coordinates.
+        # T4: CV reconstructs the SLOW modes via a fitted linear decoder; the residual
+        # stage adds back the fast modes -> full 3N coordinates. CV-agnostic (TICA/VAMPnet).
         res = art.residual
-        Vp = np.linalg.pinv(np.asarray(art.tica_eigvecs))
-        X_approx = np.asarray(art.tica_mean) + cv @ Vp           # (n_keep, 3N)
+        X_approx = (cv - np.asarray(res["cmean"])) @ np.asarray(res["B"]) + np.asarray(res["xmean"])
         rcodec = DitheredResidualCodec(n_bits=int(res["n_bits"]), seed=int(res["seed"]))
         labels_kept = np.asarray(res["labels_kept"]).astype(int)
         resid = (rcodec.dequantize(np.asarray(res["q"]), float(res["step"]))
