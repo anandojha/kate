@@ -59,6 +59,27 @@ def kinetics_artifact(n_steps=3000, n_atoms=8, nstates=40, lag=10, seed=0):
     )
 
 
+def write_tiny_dcd(tmp_dir, n_frames=400, n_atoms=6, seed=0):
+    """Write a tiny synthetic system (PDB topology + DCD trajectory) so the `compress`
+    and `benchmark` CLI subcommands can be exercised end-to-end via main([...]) without
+    the real cluster data. All heavy (carbon) atoms -> heavy_indices keeps them all.
+    Returns (pdb_path, dcd_path)."""
+    import os
+    import mdtraj as md
+    top = md.Topology()
+    chain = top.add_chain()
+    res = top.add_residue("ALA", chain)
+    for i in range(n_atoms):
+        top.add_atom("C%d" % i, md.element.carbon, res)
+    xyz = metastable_coords(n_steps=n_frames, n_atoms=n_atoms, seed=seed).astype(np.float32)
+    traj = md.Trajectory(xyz, top)
+    pdb = os.path.join(str(tmp_dir), "sys.pdb")
+    dcd = os.path.join(str(tmp_dir), "sys.dcd")
+    traj[0].save_pdb(pdb)
+    traj.save_dcd(dcd)
+    return pdb, dcd
+
+
 def toy_artifact(n=20000, a=0.02, seed=0):
     """A minimal, torch-free Artifact carrying a real 2-state MSM (no flow). Enough to
     exercise `epc bound` / save / load without training anything."""

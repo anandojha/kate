@@ -168,3 +168,20 @@ MDZip / SZ3 / ZFP build and run in their own environments and are invoked as
 **subprocesses** for the `benchmark` contrast; see `RELATED_WORK.txt`. The
 trypsin–benzamidine trajectory (`~419,213` frames, 100 ps/frame, solvent-stripped,
 nm) lives on the cluster, not in this repo.
+
+Point the wrappers (`epc.baselines`) at the tools via environment variables:
+
+| env var | points to |
+|---|---|
+| `EPC_SZ3_BIN` | the SZ3 compressor executable (e.g. `.../SZ3/build/tools/sz3/sz3`) |
+| `EPC_ZFP_BIN` | the ZFP compressor executable (e.g. `.../zfp/build/bin/zfp`) |
+| `EPC_MDZIP_DIR` | the MDZip repo directory (its own torch/lightning env) |
+
+If unset (or the tool isn't on `PATH`), the wrapper raises a clear
+`BaselineUnavailable` and the method is skipped — use the local pseudo-baselines
+(`shuffle`, `quantize`) to exercise the contrast mechanics anywhere.
+
+The **coordinate-baseline role is covered by SZ3 / ZFP / MDZip** (the published tools
+we benchmark against); we intentionally do **not** vendor an in-house coordinate codec
+(`coord_quant`) — the baselines to beat in the paper are the published tools, not our
+own reimplementation.
