@@ -164,6 +164,23 @@ invertible and the bound intact; **no lossy CNN autoencoder**):
   Prior art (cite, verify before paper): DPCM (Cutler 1952); learned hyperprior /
   autoregressive context models — Ballé et al., ICLR 2018 (arXiv:1802.01436); Minnen
   et al., NeurIPS 2018 (arXiv:1809.02736).
+- **T10 ✓ (mechanism shown on synthetic)** the kinetic path-bound made
+  **differentiable so it can be a training loss** (`epc.bound_loss`): a VAMPnet-style
+  *soft* state assignment makes the soft MSM — and the path-bound transition term
+  `h(P‖Q)` — a smooth function of the network, so `loss = rate + λ·h(P‖Q)` trains a
+  compressor to spend bits where they matter for *kinetics*, not for coordinate error.
+  This is the one place the ML and the novel idea become the same object. Demonstrated
+  in `examples/demo_bound_loss.py` on a controlled, well-sampled system (a low-amplitude
+  slow folding coordinate hidden among high-amplitude fast noise): at equal total bit
+  budget, raw-coordinate MSE (what SZ3/ZFP/MDZip minimize) spends **0 bits** on the slow
+  coordinate and its kinetic distortion is **flat in budget**, while the bound-as-loss
+  protects the slow mode and drives kinetic distortion down **~100× at 4 bits/frame**.
+  *Honest scope:* this shows the **mechanism** on synthetic; on NTL9 it is **inconclusive**
+  (sampling-limited — ~6 folding events make the transition term noise-dominated, so the
+  bound gives little training signal). `bound_loss` is the differentiable **surrogate**
+  used as a loss; the certified kinetics still come from the deeptime reversible-MLE MSM
+  + the path bound on hard states. Whether it beats MSE on real data is **empirical** and
+  must be shown on a well-sampled system — not assumed.
 
 Defaults stay `--cv tica --flow realnvp --entropy gaussian` so the tested baseline and
 the headline (the kinetic bound) are unchanged; the ML pieces are motivated opt-ins.
@@ -175,9 +192,11 @@ those libraries are absent.
 ```
 src/epc/        flow.py codec.py kinetic_codec.py pathbound.py kinetics_deeptime.py
                 inspect_traj.py runner.py  (+ artifact.py cli.py __main__.py
-                benchmark.py baselines.py temporal_prior.py vampnet_cv.py spline_flow.py)
+                benchmark.py baselines.py temporal_prior.py vampnet_cv.py spline_flow.py
+                predictive_coder.py bound_loss.py)
 tests/          pytest suite (torch/deeptime tests use importorskip)
-examples/       demo_pathbound.py demo_kinetic_codec.py demo_epc.py  (the §2 checks)
+examples/       demo_pathbound.py demo_kinetic_codec.py demo_epc.py demo_bound_loss.py
+                (the §2 checks)
 RELATED_WORK.txt  prior work + baselines this builds on and differentiates against
 ```
 

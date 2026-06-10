@@ -30,7 +30,15 @@ kinetic (path-distribution) fidelity bound.
 - **T9** predictive learned-entropy coding (`--entropy predictive`, lossy; causal GRU,
   bound-as-loss, standardized-innovation coding) — predictor built and unit-tested; the
   rate-vs-observable-error gate against T8 runs on the validation trajectory.
-- **~99% test coverage** (107 tests); torch/deeptime tests auto-skip when absent.
+- **T10** the kinetic path-bound made **differentiable as a training loss**
+  (`epc.bound_loss`): a soft-MSM transition term `h(P‖Q)` with autograd, so
+  `loss = rate + λ·h(P‖Q)` trains a compressor to spend bits on *kinetics*, not
+  coordinate error. `examples/demo_bound_loss.py` shows the mechanism on a controlled,
+  well-sampled synthetic — at equal bit budget, raw-MSE (the SZ3/ZFP objective) spends
+  0 bits on the slow coordinate and its kinetic distortion is flat in budget, while the
+  bound-as-loss drives it ~100× lower. Mechanism only; inconclusive on sampling-limited
+  NTL9; the certified kinetics still come from the deeptime MSM + hard-state path bound.
+- **~99% test coverage** (115 tests); torch/deeptime tests auto-skip when absent.
 
 ### Notes
 - `deeptime` is an optional `[kinetics]` extra; `compress` / `decompress` / `bound` run
