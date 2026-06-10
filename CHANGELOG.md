@@ -36,8 +36,11 @@ kinetic (path-distribution) fidelity bound.
   coordinate error. `examples/demo_bound_loss.py` shows the mechanism on a controlled,
   well-sampled synthetic — at equal bit budget, raw-MSE (the SZ3/ZFP objective) spends
   0 bits on the slow coordinate and its kinetic distortion is flat in budget, while the
-  bound-as-loss drives it ~100× lower. Mechanism only; inconclusive on sampling-limited
-  NTL9; the certified kinetics still come from the deeptime MSM + hard-state path bound.
+  bound-as-loss drives it ~100× lower. **Measured negative on real NTL9**: the allocation
+  correctly concentrates on the slow TICA modes but does not beat MSE on the real
+  k-means/MLE kinetics (MSE wins at higher budget) — the soft-MSM surrogate and the
+  estimator disagree; aligning them is the open problem. Reported, not hidden. The
+  certified kinetics still come from the deeptime MSM + hard-state path bound.
 - **Kinetic-resolution accounting** (`kinetics_deeptime.kinetic_resolution`,
   `epc analyze --resolution`): per dynamical process, the Bayesian timescale + 95% CI,
   relative uncertainty, and independent-event count (~ T_total / t_i); flags a process

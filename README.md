@@ -57,8 +57,10 @@ Validated on the 25 µs NTL9 fast-folder, scored **only on the kinetically resol
   **~half to a third the rate** of static coding (~9× lower timescale error at matched rate).
 - **Bit allocation that respects kinetics** ([`examples/demo_bound_loss.py`](examples/demo_bound_loss.py))
   — the differentiable path-bound (T10), trained as a loss, spends bits on the slow
-  coordinate where raw-MSE spends none (mechanism shown on a controlled synthetic;
-  inconclusive on sampling-limited NTL9, stated as such).
+  coordinate where raw-MSE spends none (mechanism shown on a controlled synthetic). On
+  **real NTL9 it is a measured negative**: the allocation correctly targets the slow
+  modes but does *not* beat MSE on the real k-means/MLE kinetics — the soft-MSM surrogate
+  and the estimator disagree. Reported, not hidden (see the T10 entry below).
 
 ## Honesty constraints (do not regress)
 
@@ -228,12 +230,19 @@ invertible and the bound intact; **no lossy CNN autoencoder**):
   budget, raw-coordinate MSE (what SZ3/ZFP/MDZip minimize) spends **0 bits** on the slow
   coordinate and its kinetic distortion is **flat in budget**, while the bound-as-loss
   protects the slow mode and drives kinetic distortion down **~100× at 4 bits/frame**.
-  *Honest scope:* this shows the **mechanism** on synthetic; on NTL9 it is **inconclusive**
-  (sampling-limited — ~6 folding events make the transition term noise-dominated, so the
-  bound gives little training signal). `bound_loss` is the differentiable **surrogate**
-  used as a loss; the certified kinetics still come from the deeptime reversible-MLE MSM
-  + the path bound on hard states. Whether it beats MSE on real data is **empirical** and
-  must be shown on a well-sampled system — not assumed.
+  *Honest scope:* this shows the **mechanism** on synthetic. On **real NTL9 CVs the
+  bound-loss does NOT beat MSE** — a measured negative: it *does* correctly concentrate
+  bits on the slow TICA modes and starve the fast ones (the allocation mechanism works),
+  but at equal budget its resolved-kinetics error is no better than uniform MSE, and at
+  higher budget MSE wins (3.4% vs 13.8% timescale error). The cause is concrete and worth
+  reporting: the real MSM discretizes with **k-means over all 8 CVs**, so zeroing the fast
+  modes corrupts the clustering, whereas the differentiable **soft-MSM surrogate** treats
+  those modes as irrelevant — *surrogate and estimator disagree*. So `bound_loss` is a
+  differentiable surrogate whose training signal does not (yet) transfer to the k-means/MLE
+  estimator on this system; aligning the two (soft states matched to the discretization)
+  is the open problem. The certified kinetics still come from the deeptime reversible-MLE
+  MSM + the path bound on hard states. Whether the surrogate beats MSE on real data is
+  **empirical** — and here, honestly, it did not.
 
 Defaults stay `--cv tica --flow realnvp --entropy gaussian` so the tested baseline and
 the headline (the kinetic bound) are unchanged; the ML pieces are motivated opt-ins.
