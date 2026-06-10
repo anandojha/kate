@@ -1,0 +1,217 @@
+"""
+cli.py -- the single ``epc`` entry point.
+
+  epc compress   TOP DCD -o ART      align -> CV/flow -> IGFS -> entropy code + MSM
+  epc decompress ART -o OUT          flow inverse for kept frames (+T4 full-atom)
+  epc analyze    ART                 deeptime MSM: timescales, lag scan, Bayesian bars  [T2]
+  epc bound      ART REF             ensemble term, transition term, Pinsker pair/path
+  epc benchmark  TOP DCD             EPC vs MDZip/SZ3/ZFP, scored by the path bound      [T3]
+
+Imports are LAZY PER SUBCOMMAND: the module top level imports only argparse, and each
+handler imports only what it needs. So ``epc bound`` (pure numpy) never imports torch
+or deeptime -- the kinetic guarantee runs on a box without either.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+
+# ----------------------------------------------------------------------------- #
+# helpers
+# ----------------------------------------------------------------------------- #
+def _is_artifact_dir(path: str) -> bool:
+    return os.path.isdir(path) and os.path.exists(os.path.join(path, "config.json"))
+
+
+def _load_reference_counts(path: str):
+    """Reference dynamics P for `bound`: an .epc artifact (use its counts) or an
+    .npy/.npz holding a count/transition matrix."""
+    import numpy as np
+    if _is_artifact_dir(path):
+        from .artifact import load_artifact
+        return load_artifact(path, with_flow=False).counts
+    obj = np.load(path, allow_pickle=False)
+    if hasattr(obj, "files"):
+        for key in ("counts", "C", "T_msm", "T"):
+            if key in obj.files:
+                return obj[key]
+        return obj[obj.files[0]]
+    return obj
+
+
+# ----------------------------------------------------------------------------- #
+# subcommands
+# ----------------------------------------------------------------------------- #
+def cmd_compress(args):
+    from .runner import run_epc, print_report
+    from .artifact import save_artifact
+    art, report = run_epc(
+        args.top, args.dcd, stride=args.stride, cv_dim=args.cv_dim,
+        keep_frac=args.keep_frac, epochs=args.epochs, nstates=args.nstates,
+        lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits)
+    # method tags (T6-T8 opt-ins; defaults keep the tested baseline)
+    art.cv = args.cv
+    art.flow_kind = args.flow
+    art.entropy = args.entropy
+    print_report(report)
+    save_artifact(art, args.out)
+    print("  artifact written      : %s" % args.out)
+
+
+def cmd_decompress(args):
+    import numpy as np
+    import torch
+    from .artifact import load_artifact
+    from .codec import decode_iid, gaussian_cumfreq
+    art = load_artifact(args.artifact, with_flow=True)
+    flow = art.build_flow()
+    cum = gaussian_cumfreq(art.L, art.zmax)
+    dlev = decode_iid(art.coded_latents, art.n_keep * art.cv_dim, cum)
+    dlev = dlev.reshape(art.n_keep, art.cv_dim)
+    zrec = -art.zmax + (dlev + 0.5) * (2 * art.zmax / art.L)
+    with torch.no_grad():
+        cv = flow.inverse(torch.as_tensor(zrec, dtype=torch.float32)).numpy()
+    print("=" * 70)
+    print("DECOMPRESS  %s -> %s" % (args.artifact, args.out))
+    print("  kept frames           : %d  (CV-space, %d-D)" % (art.n_keep, art.cv_dim))
+    if args.full_atom:
+        if art.residual is None:
+            print("  --full-atom requested but this artifact has NO residual stage;")
+            print("  full-atom (3N) reconstruction is build target T4. Writing CV space.")
+        else:
+            print("  (full-atom residual reconstruction: T4)")
+    np.save(args.out, cv)
+    print("  wrote kept CV frames  : %s  shape %s" % (args.out, cv.shape))
+    print("=" * 70)
+
+
+def cmd_bound(args):
+    import numpy as np
+    from .artifact import load_artifact
+    from .pathbound import report_kinetic_fidelity
+    from .kinetic_codec import largest_connected_set, transition_matrix
+
+    Q_art = load_artifact(args.artifact, with_flow=False)     # no torch
+    Cq = np.asarray(Q_art.counts, dtype=np.float64)
+    Cp = np.asarray(_load_reference_counts(args.ref), dtype=np.float64)
+    lag = args.lag if args.lag is not None else Q_art.lag
+    L = args.L if args.L is not None else sum(Q_art.run_lengths)
+
+    n = min(Cp.shape[0], Cq.shape[0])
+    if Cp.shape[0] != Cq.shape[0]:
+        print("  WARNING: reference (%d) and artifact (%d) state counts differ; comparing"
+              " the first %d states. For a FAIR comparison discretize both on COMMON"
+              " k-means centers (see `epc benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
+    Cp, Cq = Cp[:n, :n], Cq[:n, :n]
+    act = largest_connected_set(Cp + Cq)        # ergodic under the combined counts
+    P, _ = transition_matrix(Cp[np.ix_(act, act)], reversible=True)
+    Q, _ = transition_matrix(Cq[np.ix_(act, act)], reversible=True)
+    r = report_kinetic_fidelity(P, Q, lag=lag, L=L, k=4)
+
+    dt = Q_art.dt_strided_ns
+    print("=" * 72)
+    print("KINETIC FIDELITY  (path-distribution bound; lag=%d frames, L=%d)" % (lag, L))
+    print("  artifact (Q)          : %s" % args.artifact)
+    print("  reference (P)         : %s" % args.ref)
+    print("  active states         : %d" % len(act))
+    print("-" * 72)
+    print("  ensemble term   D(mu_P||mu_Q)     : %.4e nats   (STATIC bound sees only this)"
+          % r["ensemble_kl_nats"])
+    print("  transition term h(P||Q)           : %.4e nats/step   (the KINETIC signal)"
+          % r["transition_kl_rate_nats_per_step"])
+    print("  two-slice KL (pairs)              : %.4e nats" % r["two_slice_kl_nats"])
+    print("  path KL over %d frames        : %.4e nats" % (L, r.get("path_kl_nats", 0.0)))
+    print("-" * 72)
+    print("  Pinsker ENSEMBLE bound            : %.4e   (covers STATIC observables only)"
+          % r["pinsker_ensemble_bound"])
+    print("  Pinsker PAIR bound                : %.4e   (covers KINETIC observables)"
+          % r["pinsker_pair_bound"])
+    if "pinsker_path_bound" in r:
+        print("  Pinsker PATH bound (L frames)     : %.4e" % r["pinsker_path_bound"])
+    print("-" * 72)
+    print("  implied timescales ref (P)        : %s frames" % np.round(r["its_ref"], 1))
+    print("                          (= %s ns)" % np.round(r["its_ref"] * dt, 1))
+    print("  implied timescales cmp (Q)        : %s frames" % np.round(r["its_cmp"], 1))
+    print("                          (= %s ns)" % np.round(r["its_cmp"] * dt, 1))
+    print("  support_ok (path KL finite)       : %s" % r["support_ok"])
+    print("=" * 72)
+    print("Reading: the STATIC (ensemble) Pinsker bound does NOT cover kinetics; only the")
+    print("PAIR / PATH bound (which includes the transition term) does. A large transition")
+    print("term with a ~0 ensemble term is exactly 'ensemble preserved, kinetics not'.")
+    print("=" * 72)
+
+
+def cmd_analyze(args):
+    raise SystemExit(
+        "`epc analyze` (deeptime lag scan / Bayesian error bars) is wired in build "
+        "target T2. Install the engine with `pip install epc[kinetics]`.")
+
+
+def cmd_benchmark(args):
+    raise SystemExit(
+        "`epc benchmark` (EPC vs MDZip/SZ3/ZFP contrast, scored by the path bound) is "
+        "wired in build target T3.")
+
+
+# ----------------------------------------------------------------------------- #
+# parser
+# ----------------------------------------------------------------------------- #
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="epc",
+        description="Ensemble-Preserving Compression of MD trajectories, with a "
+                    "kinetic (path-distribution) fidelity bound.")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    c = sub.add_parser("compress", help="TOP DCD -> artifact (flow EPC + retained MSM)")
+    c.add_argument("top"); c.add_argument("dcd")
+    c.add_argument("-o", "--out", required=True, help="output artifact path (NAME.epc)")
+    c.add_argument("--stride", type=int, default=10)
+    c.add_argument("--cv-dim", type=int, default=6)
+    c.add_argument("--keep-frac", type=float, default=0.10)
+    c.add_argument("--epochs", type=int, default=300)
+    c.add_argument("--nstates", type=int, default=200)
+    c.add_argument("--lag-ns", type=float, default=5.0)
+    c.add_argument("--dt-ps", type=float, default=100.0)
+    c.add_argument("--lat-bits", type=int, default=14)
+    # ML opt-ins (defaults = the tested baseline; T6-T8 enable the alternatives)
+    c.add_argument("--cv", choices=["tica", "vampnet"], default="tica")
+    c.add_argument("--flow", choices=["realnvp", "spline"], default="realnvp")
+    c.add_argument("--entropy", choices=["gaussian", "temporal"], default="gaussian")
+    c.set_defaults(func=cmd_compress)
+
+    d = sub.add_parser("decompress", help="artifact -> trajectory (kept frames)")
+    d.add_argument("artifact")
+    d.add_argument("-o", "--out", required=True, help="output .npy")
+    d.add_argument("--full-atom", action="store_true", help="full 3N reconstruction (T4)")
+    d.set_defaults(func=cmd_decompress)
+
+    a = sub.add_parser("analyze", help="artifact -> kinetics (deeptime) [T2]")
+    a.add_argument("artifact")
+    a.add_argument("--lag-scan", action="store_true")
+    a.add_argument("--bayes", action="store_true")
+    a.set_defaults(func=cmd_analyze)
+
+    b = sub.add_parser("bound", help="artifact ref -> kinetic-fidelity report")
+    b.add_argument("artifact"); b.add_argument("ref")
+    b.add_argument("--lag", type=int, default=None, help="override lag (frames)")
+    b.add_argument("--L", type=int, default=None, help="trajectory length for the path KL")
+    b.set_defaults(func=cmd_bound)
+
+    k = sub.add_parser("benchmark", help="TOP DCD -> contrast table+plot [T3]")
+    k.add_argument("top"); k.add_argument("dcd")
+    k.add_argument("--methods", default="epc,sz3,zfp,mdzip")
+    k.add_argument("--out", default="benchmark")
+    k.set_defaults(func=cmd_benchmark)
+    return p
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

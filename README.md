@@ -111,6 +111,19 @@ count matrix), so `analyze`/`benchmark` can re-estimate the MSM at **any** lag.
 Run the test suite with `pytest` (torch/deeptime-dependent tests auto-skip if those
 libraries are absent).
 
+### Reproducibility note (kinetics)
+
+The **crude classical estimator** in `kinetic_codec` (a single-lag `(C+C^T)/2` MSM on
+TICA of aligned **Cartesian** coordinates) is featurization-limited and its recovered
+timescales are **library-version sensitive** — on the newest numpy/scipy/sklearn the
+synthetic demo's slow timescales are under-resolved (the leading TICA mode on raw
+Cartesian is spurious). This is expected and is exactly why the RECIPE makes deeptime
+the published path: implied timescales are a **lower bound that converges upward with
+lag** (Prinz et al.), so the rigorous kinetics come from a **deeptime reversible-MLE
+MSM + lag scan** (`epc analyze`, version-stable) and, for nonlinear slow CVs, from
+**VAMPnets [T6]** on **ligand-pocket contacts** (not raw Cartesian). The bound, the
+flow, the EPC pipeline, and the thermodynamics (state populations) are unaffected.
+
 ## Build targets (status)
 
 Classical / scaling track — `RECIPE.txt` §4:
