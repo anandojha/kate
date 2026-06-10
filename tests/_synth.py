@@ -36,6 +36,29 @@ def metastable_coords(n_steps=1500, n_atoms=6, a=0.01, intra=0.25, noise=0.10, s
     return xyz.astype(np.float64)
 
 
+def kinetics_artifact(n_steps=3000, n_atoms=8, nstates=40, lag=10, seed=0):
+    """A torch-free Artifact carrying a realistic multi-microstate dtraj (classical
+    TICA + k-means on a metastable trajectory) -- enough to exercise `epc analyze`."""
+    from epc.kinetic_codec import (kabsch_align, TICA, discretize, count_matrix,
+                                   transition_matrix)
+    coords = metastable_coords(n_steps=n_steps, n_atoms=n_atoms, seed=seed)
+    aligned, _ = kabsch_align(coords, None)
+    X = aligned.reshape(n_steps, -1)
+    tica = TICA(lag=lag, n_components=2).fit([X])
+    CV = tica.transform(X)
+    labels, centers = discretize([CV], nstates, seed)
+    C = count_matrix(labels, nstates, lag)
+    T, _ = transition_matrix(C, reversible=True)
+    return Artifact(
+        cv_dim=2, L=1 << 12, zmax=6.0, n_keep=2,
+        coded_latents=b"", kept_idx=np.array([0, 1], dtype=np.int64),
+        run_lengths=[n_steps], dtraj=labels, centers=centers,
+        counts=C, T_msm=T, n_states=nstates, lag=lag,
+        stride=1, dt_ps=100.0, dt_strided_ns=0.1,
+        flow_arch={"dim": 2, "hidden": 64, "n_layers": 10},
+    )
+
+
 def toy_artifact(n=20000, a=0.02, seed=0):
     """A minimal, torch-free Artifact carrying a real 2-state MSM (no flow). Enough to
     exercise `epc bound` / save / load without training anything."""

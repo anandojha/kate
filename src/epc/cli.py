@@ -144,9 +144,67 @@ def cmd_bound(args):
 
 
 def cmd_analyze(args):
-    raise SystemExit(
-        "`epc analyze` (deeptime lag scan / Bayesian error bars) is wired in build "
-        "target T2. Install the engine with `pip install epc[kinetics]`.")
+    """Production kinetics (T2) from the artifact's stored run-aware dtraj: a
+    reversible maximum-likelihood MSM, an implied-timescale lag scan (the honest lag
+    choice), and Bayesian error bars -- all WITHOUT decoding any coordinates."""
+    import numpy as np
+    from .artifact import load_artifact
+    from . import kinetics_deeptime as kd
+    if not kd._HAVE_DEEPTIME:
+        raise SystemExit("`epc analyze` needs the kinetics engine: "
+                         "pip install epc[kinetics]  (deeptime). Original error: %r"
+                         % (kd._IMPORT_ERR,))
+
+    art = load_artifact(args.artifact, with_flow=False)
+    dtrajs = [np.asarray(d, dtype=np.int64) for d in art.dtraj]
+    dt = art.dt_strided_ns
+    base_lag = args.lag if args.lag is not None else art.lag
+    k = args.k
+    min_run = min(len(d) for d in dtrajs)
+
+    print("=" * 72)
+    print("KINETICS  (deeptime reversible-MLE MSM; from the stored dtraj, no decode)")
+    print("  artifact              : %s" % args.artifact)
+    print("  runs / frames         : %d / %d   (%.4f ns/frame)"
+          % (len(dtrajs), sum(len(d) for d in dtrajs), dt))
+    print("  microstates           : %d   base lag : %d frames (%.2f ns)"
+          % (art.n_states, base_lag, base_lag * dt))
+
+    if args.lag_scan:
+        if args.lags:
+            lags = [int(x) for x in args.lags.split(",")]
+        else:
+            lags = sorted({max(1, int(base_lag * f))
+                           for f in (0.25, 0.5, 1, 2, 4)})
+        lags = [L for L in lags if L < min_run // 2]
+        scan = kd.its_lag_scan(dtrajs, lags, k=k)
+        print("-" * 72)
+        print("IMPLIED-TIMESCALE LAG SCAN  (pick the lag where these PLATEAU)")
+        print("  lag(frames)  lag(ns)   t2..t%d (ns)" % (k + 1))
+        for L, ts in zip(lags, scan):
+            print("  %9d  %7.2f   %s" % (L, L * dt, np.round(ts * dt, 1)))
+        print("  (timescales are a LOWER BOUND; they rise with lag, then plateau --")
+        print("   the plateau lag is the honest MSM lag, per Prinz et al.)")
+
+    print("-" * 72)
+    if args.bayes:
+        mean, std = kd.bayes_timescales(dtrajs, base_lag, k=k, n_samples=args.n_samples)
+        print("IMPLIED TIMESCALES with BAYESIAN error bars  (lag %d, %d samples)"
+              % (base_lag, args.n_samples))
+        for i in range(len(mean)):
+            print("  t%-2d : %8.1f +/- %6.1f ns   (%.1f +/- %.1f frames)"
+                  % (i + 2, mean[i] * dt, std[i] * dt, mean[i], std[i]))
+    else:
+        its = kd.implied_timescales(dtrajs, base_lag, k=k)
+        print("IMPLIED TIMESCALES  (reversible MLE, lag %d frames)" % base_lag)
+        print("  frames : %s" % np.round(its, 1))
+        print("  ns     : %s" % np.round(its * dt, 1))
+    print("-" * 72)
+    print("Caveats (RECIPE T2): featurize on LIGAND-POCKET CONTACTS (not raw Cartesian)")
+    print("for binding kinetics and align on protein only; report k_on/k_off ONLY if the")
+    print("binding/unbinding event count supports it -- otherwise lean on the implied")
+    print("timescales / MSM eigenvalues and say so.")
+    print("=" * 72)
 
 
 def cmd_benchmark(args):
@@ -188,10 +246,14 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--full-atom", action="store_true", help="full 3N reconstruction (T4)")
     d.set_defaults(func=cmd_decompress)
 
-    a = sub.add_parser("analyze", help="artifact -> kinetics (deeptime) [T2]")
+    a = sub.add_parser("analyze", help="artifact -> kinetics (deeptime MSM)")
     a.add_argument("artifact")
-    a.add_argument("--lag-scan", action="store_true")
-    a.add_argument("--bayes", action="store_true")
+    a.add_argument("--lag", type=int, default=None, help="MSM lag in frames (default: artifact's)")
+    a.add_argument("--lag-scan", action="store_true", help="implied-timescale lag scan")
+    a.add_argument("--lags", default=None, help="comma-separated lags for the scan")
+    a.add_argument("--bayes", action="store_true", help="Bayesian timescale error bars")
+    a.add_argument("--k", type=int, default=4, help="number of slow timescales")
+    a.add_argument("--n-samples", type=int, default=100, help="Bayesian MSM samples")
     a.set_defaults(func=cmd_analyze)
 
     b = sub.add_parser("bound", help="artifact ref -> kinetic-fidelity report")
