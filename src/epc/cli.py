@@ -65,6 +65,7 @@ def cmd_decompress(args):
     import torch
     from .artifact import load_artifact
     from .codec import decode_iid, gaussian_cumfreq
+    from .kinetic_codec import DitheredResidualCodec
     art = load_artifact(args.artifact, with_flow=True)
     flow = art.build_flow()
     cum = gaussian_cumfreq(art.L, art.zmax)
@@ -73,17 +74,34 @@ def cmd_decompress(args):
     zrec = -art.zmax + (dlev + 0.5) * (2 * art.zmax / art.L)
     with torch.no_grad():
         cv = flow.inverse(torch.as_tensor(zrec, dtype=torch.float32)).numpy()
+
     print("=" * 70)
     print("DECOMPRESS  %s -> %s" % (args.artifact, args.out))
     print("  kept frames           : %d  (CV-space, %d-D)" % (art.n_keep, art.cv_dim))
-    if args.full_atom:
-        if art.residual is None:
+
+    if args.full_atom and art.residual is not None:
+        # T4: CV reconstructs the SLOW modes; the residual stage adds back the fast
+        # modes -> full 3N coordinates.
+        res = art.residual
+        Vp = np.linalg.pinv(np.asarray(art.tica_eigvecs))
+        X_approx = np.asarray(art.tica_mean) + cv @ Vp           # (n_keep, 3N)
+        rcodec = DitheredResidualCodec(n_bits=int(res["n_bits"]), seed=int(res["seed"]))
+        labels_kept = np.asarray(res["labels_kept"]).astype(int)
+        resid = (rcodec.dequantize(np.asarray(res["q"]), float(res["step"]))
+                 + np.asarray(res["state_mean_R"])[labels_kept])
+        N = int(res["n_atoms"])
+        out_arr = (X_approx + resid).reshape(art.n_keep, N, 3)
+        print("  reconstruction        : FULL-ATOM (3N) via the T4 residual stage")
+        print("  shape                 : %s  (n_keep, atoms, xyz)" % (out_arr.shape,))
+    else:
+        if args.full_atom:
             print("  --full-atom requested but this artifact has NO residual stage;")
-            print("  full-atom (3N) reconstruction is build target T4. Writing CV space.")
-        else:
-            print("  (full-atom residual reconstruction: T4)")
-    np.save(args.out, cv)
-    print("  wrote kept CV frames  : %s  shape %s" % (args.out, cv.shape))
+            print("  writing CV-space kept frames instead.")
+        out_arr = cv
+        print("  reconstruction        : CV-space kept frames")
+
+    np.save(args.out, out_arr)
+    print("  wrote                 : %s  shape %s" % (args.out, out_arr.shape))
     print("=" * 70)
 
 
