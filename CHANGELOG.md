@@ -44,6 +44,11 @@ kinetic (path-distribution) fidelity bound.
   `resolved` only if its error is small AND it has enough events. Makes explicit which
   kinetic observables a trajectory can validate — on 25 µs NTL9 the slow folding modes
   read as not-resolved, the fast band as resolved.
+- **T9 rate gain measured on real NTL9 latents** (`docs/ntl9_temporal_redundancy.png`):
+  at equal distortion, predictive coding saves ~15 bits/frame (~43%) over static
+  per-frame coding at the 0.5 ns storage stride. Corrects the earlier conservative hedge
+  — EPC compresses slow CVs, which stay strongly autocorrelated (ρ≈0.98) even at storage
+  spacing, so the temporal redundancy is large and real. Rate side of the gate, empirical.
 - **~99% test coverage** (118 tests); torch/deeptime tests auto-skip when absent.
 
 ### Notes
