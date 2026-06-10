@@ -127,6 +127,64 @@ def bayes_timescales(dtrajs, lag, k=5, n_samples=100, reversible=True):
     return samples.mean(axis=0), samples.std(axis=0)
 
 
+def kinetic_resolution(dtrajs, lag, dt_ns, k=5, n_samples=100,
+                       rel_err_max=0.25, min_events=10, reversible=True):
+    """Honest kinetic-RESOLUTION report -- which dynamical processes this trajectory
+    can actually validate. For each implied-timescale process it returns the Bayesian
+    timescale, its 95% confidence interval, the relative uncertainty, and the number of
+    INDEPENDENT events the trajectory contains for it (~ T_total / t_i, the number of
+    round trips). A process is flagged `resolved` only if its Bayesian relative error is
+    below `rel_err_max` AND it has at least `min_events` independent events: you cannot
+    claim to preserve a kinetic observable the SOURCE trajectory never sampled, no matter
+    how good the compressor. `dt_ns` converts (strided) frames to nanoseconds. Returns a
+    list of dicts, slowest process first.
+
+    This is the discipline the MD-compression literature usually skips: report the
+    statistical resolution of the reference before comparing methods on it."""
+    _require()
+    mean, std = bayes_timescales(dtrajs, lag, k=k, n_samples=int(n_samples),
+                                 reversible=reversible)
+    T_ns = sum(len(np.asarray(d)) for d in dtrajs) * float(dt_ns)
+    report = []
+    for i, (m, s) in enumerate(zip(mean, std)):
+        t = float(m) * float(dt_ns)
+        sd = float(s) * float(dt_ns)
+        rel = sd / t if t > 0 else float("inf")
+        nev = T_ns / t if t > 0 else 0.0
+        report.append({
+            "process": i + 1,
+            "timescale_ns": t,
+            "ci_lo_ns": max(0.0, t - 1.96 * sd),    # timescales are non-negative
+            "ci_hi_ns": t + 1.96 * sd,
+            "rel_err": rel,
+            "n_events": nev,
+            "resolved": bool(rel < rel_err_max and nev >= min_events),
+        })
+    return report
+
+
+def format_resolution(report, total_us=None):
+    """Pretty-print a kinetic_resolution() report as a table (returned as a string)."""
+    lines = []
+    if total_us is not None:
+        lines.append("trajectory length: %.1f us" % total_us)
+    lines.append(" proc  timescale(ns)   Bayes 95% CI (ns)       rel.err   indep.events   resolved?")
+    for r in report:
+        lines.append("  t%-2d   %9.0f    [%8.0f,%8.0f]    %5.0f%%      %7.1f       %s"
+                     % (r["process"], r["timescale_ns"], r["ci_lo_ns"], r["ci_hi_ns"],
+                        100 * r["rel_err"], r["n_events"], "YES" if r["resolved"] else "no"))
+    nres = sum(r["resolved"] for r in report)
+    fastest_unres = next((r["timescale_ns"] for r in report if not r["resolved"]), None)
+    if nres == 0:
+        lines.append("=> NONE of the listed processes are statistically resolved here.")
+    else:
+        res_ts = [r["timescale_ns"] for r in report if r["resolved"]]
+        lines.append("=> resolved: processes <= %.0f ns (%d of %d). Slower processes are "
+                     "sampling-limited;" % (max(res_ts), nres, len(report)))
+        lines.append("   kinetic claims must target the resolved band, not the slow tail.")
+    return "\n".join(lines)
+
+
 def msm_for_pathbound(dtrajs, lag, reversible=True):
     """Return (transition_matrix, active_state_indices) for handing to
     epc_pathbound.report_kinetic_fidelity. To compare two compressors fairly,

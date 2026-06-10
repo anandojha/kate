@@ -38,7 +38,13 @@ kinetic (path-distribution) fidelity bound.
   0 bits on the slow coordinate and its kinetic distortion is flat in budget, while the
   bound-as-loss drives it ~100× lower. Mechanism only; inconclusive on sampling-limited
   NTL9; the certified kinetics still come from the deeptime MSM + hard-state path bound.
-- **~99% test coverage** (115 tests); torch/deeptime tests auto-skip when absent.
+- **Kinetic-resolution accounting** (`kinetics_deeptime.kinetic_resolution`,
+  `epc analyze --resolution`): per dynamical process, the Bayesian timescale + 95% CI,
+  relative uncertainty, and independent-event count (~ T_total / t_i); flags a process
+  `resolved` only if its error is small AND it has enough events. Makes explicit which
+  kinetic observables a trajectory can validate — on 25 µs NTL9 the slow folding modes
+  read as not-resolved, the fast band as resolved.
+- **~99% test coverage** (118 tests); torch/deeptime tests auto-skip when absent.
 
 ### Notes
 - `deeptime` is an optional `[kinetics]` extra; `compress` / `decompress` / `bound` run

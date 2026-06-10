@@ -230,6 +230,19 @@ def cmd_analyze(args):
             print("  -> too few transitions / disconnected states; use fewer microstates,")
             print("     a different lag, or more sampling. (Not a tool error -- a data/")
             print("     discretization limit; see the lag scan above.)")
+    if args.resolution:
+        print("-" * 72)
+        print("KINETIC RESOLUTION  (which processes this trajectory can actually validate)")
+        try:
+            rep = kd.kinetic_resolution(dtrajs, base_lag, dt, k=k,
+                                        n_samples=args.n_samples)
+            total_us = sum(len(d) for d in dtrajs) * dt / 1000.0
+            print(kd.format_resolution(rep, total_us=total_us))
+        except Exception as e:
+            print("  resolution report unavailable: the Bayesian MSM did not converge "
+                  "at lag %d (%s)." % (base_lag, type(e).__name__))
+        print("  (A kinetic observable the SOURCE trajectory never sampled cannot be")
+        print("   'preserved' by any compressor -- report this BEFORE comparing methods.)")
     print("-" * 72)
     print("Caveats (RECIPE T2): featurize on LIGAND-POCKET CONTACTS (not raw Cartesian)")
     print("for binding kinetics and align on protein only; report k_on/k_off ONLY if the")
@@ -306,6 +319,9 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--lag-scan", action="store_true", help="implied-timescale lag scan")
     a.add_argument("--lags", default=None, help="comma-separated lags for the scan")
     a.add_argument("--bayes", action="store_true", help="Bayesian timescale error bars")
+    a.add_argument("--resolution", action="store_true",
+                   help="kinetic-resolution report: which processes are statistically "
+                        "resolved (Bayesian CI + independent-event count)")
     a.add_argument("--k", type=int, default=4, help="number of slow timescales")
     a.add_argument("--n-samples", type=int, default=100, help="Bayesian MSM samples")
     a.set_defaults(func=cmd_analyze)

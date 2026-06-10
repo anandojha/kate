@@ -98,7 +98,7 @@ nor deeptime eagerly — enforced by `tests/test_no_eager_torch.py`.
 ```
 epc compress   TOP DCD  -> artifact    align -> CV/flow -> IGFS -> entropy code + retained MSM
 epc decompress artifact -> trajectory  flow inverse for kept frames; full-atom residual stage
-epc analyze    artifact -> kinetics    deeptime MSM: timescales, lag scan, Bayesian error bars
+epc analyze    artifact -> kinetics    deeptime MSM: timescales, lag scan, Bayesian bars, --resolution
 epc bound      artifact ref -> report  ensemble term, transition term, Pinsker pair/path bounds
 epc benchmark  TOP DCD  -> table+plot  EPC vs MDZip vs SZ3 vs ZFP, each scored by the path bound
 ```
@@ -107,6 +107,17 @@ Module map: `compress = runner.py/codec.py`, `decompress = codec.py (+T4 residua
 `analyze = kinetics_deeptime.py`, `bound = pathbound.py`, `benchmark = benchmark.py`.
 The artifact stores the run-aware **all-frame dtraj + k-means centers** (not just one
 count matrix), so `analyze`/`benchmark` can re-estimate the MSM at **any** lag.
+
+`epc analyze --resolution` adds a **kinetic-resolution report**: per dynamical process,
+the Bayesian timescale, its 95% confidence interval, the relative uncertainty, and the
+number of *independent events* the trajectory contains (~ T_total / t_i). A process is
+flagged *resolved* only if its Bayesian error is small **and** it has enough events —
+because no compressor can preserve a kinetic observable the **source** trajectory never
+sampled. On the 25 µs NTL9 set this correctly reports the slow folding modes (> ~3 µs,
+< a handful of events) as **not resolved** and the faster band as resolved — so any
+kinetic claim is held to what the data actually supports, not to the slowest eigenvalue
+the estimator happens to return. This honesty step is usually omitted in the
+MD-compression literature.
 
 ## Sanity checks (all pass on CPU)
 
