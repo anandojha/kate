@@ -98,11 +98,18 @@ def implied_timescales(dtrajs, lag, k=5, reversible=True):
 def its_lag_scan(dtrajs, lags, k=5, reversible=True):
     """Implied timescales vs lag -- the convergence check that justifies a lag
     choice. Returns array (len(lags), k) in frames. Timescales should plateau
-    once the lag exceeds the discretization error; pick the lag where they do."""
+    once the lag exceeds the discretization error; pick the lag where they do.
+
+    Robust to the reversible-MLE NOT CONVERGING (which happens on real data when the
+    discretization is too fine / poorly connected at a given lag): the failing lag's
+    row is filled with NaN rather than raising, so the rest of the scan still reports."""
     _require()
     out = []
     for lag in lags:
-        out.append(mlmsm(dtrajs, int(lag), reversible).timescales(k=k))
+        try:
+            out.append(mlmsm(dtrajs, int(lag), reversible).timescales(k=k))
+        except Exception:                       # deeptime MLE non-convergence, etc.
+            out.append(np.full(k, np.nan))
     return np.asarray(out)
 
 

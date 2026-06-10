@@ -144,10 +144,18 @@ def save_artifact(art: Artifact, path: str) -> str:
         if v is not None:
             arrays[name] = np.asarray(v, dtype=np.float64)
     if art.residual is not None:
-        # residual is a small dict of arrays/scalars (T4); flatten with a prefix.
+        # residual is a small dict of arrays/scalars (T4); flatten with a prefix. The
+        # quantized levels are stored as the smallest safe int dtype (16-bit covers the
+        # dithered-quantizer range for any sane n_bits) instead of int64 -- an 8x cut
+        # before compression.
         for k, v in art.residual.items():
-            arrays[f"residual__{k}"] = np.asarray(v)
-    np.savez(os.path.join(path, "arrays.npz"), **arrays)
+            a = np.asarray(v)
+            if k == "q" and np.issubdtype(a.dtype, np.integer):
+                a = a.astype(np.int32 if np.abs(a).max(initial=0) > 32000 else np.int16)
+            arrays[f"residual__{k}"] = a
+    # COMPRESSED npz (zlib): the residual levels are small integers that compress hard,
+    # bringing the on-disk artifact close to the honest bit-accounting size.
+    np.savez_compressed(os.path.join(path, "arrays.npz"), **arrays)
 
     if art.flow_state is not None:
         import torch

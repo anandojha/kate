@@ -192,28 +192,44 @@ def cmd_analyze(args):
             lags = sorted({max(1, int(base_lag * f))
                            for f in (0.25, 0.5, 1, 2, 4)})
         lags = [L for L in lags if L < min_run // 2]
-        scan = kd.its_lag_scan(dtrajs, lags, k=k)
+        scan = kd.its_lag_scan(dtrajs, lags, k=k)         # NaN rows on non-convergence
         print("-" * 72)
         print("IMPLIED-TIMESCALE LAG SCAN  (pick the lag where these PLATEAU)")
         print("  lag(frames)  lag(ns)   t2..t%d (ns)" % (k + 1))
         for L, ts in zip(lags, scan):
-            print("  %9d  %7.2f   %s" % (L, L * dt, np.round(ts * dt, 1)))
+            tag = "  [MLE did not converge]" if np.all(np.isnan(ts)) else ""
+            print("  %9d  %7.2f   %s%s" % (L, L * dt, np.round(ts * dt, 1), tag))
         print("  (timescales are a LOWER BOUND; they rise with lag, then plateau --")
-        print("   the plateau lag is the honest MSM lag, per Prinz et al.)")
+        print("   the plateau lag is the honest MSM lag, per Prinz et al. A lag whose")
+        print("   reversible MLE did not converge -- too few transitions / disconnected")
+        print("   states at that lag -- is flagged; use fewer microstates or more data.)")
 
     print("-" * 72)
     if args.bayes:
-        mean, std = kd.bayes_timescales(dtrajs, base_lag, k=k, n_samples=args.n_samples)
-        print("IMPLIED TIMESCALES with BAYESIAN error bars  (lag %d, %d samples)"
-              % (base_lag, args.n_samples))
-        for i in range(len(mean)):
-            print("  t%-2d : %8.1f +/- %6.1f ns   (%.1f +/- %.1f frames)"
-                  % (i + 2, mean[i] * dt, std[i] * dt, mean[i], std[i]))
+        try:
+            mean, std = kd.bayes_timescales(dtrajs, base_lag, k=k, n_samples=args.n_samples)
+            print("IMPLIED TIMESCALES with BAYESIAN error bars  (lag %d, %d samples)"
+                  % (base_lag, args.n_samples))
+            for i in range(len(mean)):
+                print("  t%-2d : %8.1f +/- %6.1f ns   (%.1f +/- %.1f frames)"
+                      % (i + 2, mean[i] * dt, std[i] * dt, mean[i], std[i]))
+        except Exception as e:
+            print("BAYESIAN error bars: the MSM did not converge at lag %d (%s)."
+                  % (base_lag, type(e).__name__))
+            print("  -> the discretization is too fine / poorly connected at this lag;")
+            print("     try fewer microstates (--nstates), a different lag, or more data.")
     else:
-        its = kd.implied_timescales(dtrajs, base_lag, k=k)
-        print("IMPLIED TIMESCALES  (reversible MLE, lag %d frames)" % base_lag)
-        print("  frames : %s" % np.round(its, 1))
-        print("  ns     : %s" % np.round(its * dt, 1))
+        try:
+            its = kd.implied_timescales(dtrajs, base_lag, k=k)
+            print("IMPLIED TIMESCALES  (reversible MLE, lag %d frames)" % base_lag)
+            print("  frames : %s" % np.round(its, 1))
+            print("  ns     : %s" % np.round(its * dt, 1))
+        except Exception as e:
+            print("IMPLIED TIMESCALES: the reversible MLE did not converge at lag %d (%s)."
+                  % (base_lag, type(e).__name__))
+            print("  -> too few transitions / disconnected states; use fewer microstates,")
+            print("     a different lag, or more sampling. (Not a tool error -- a data/")
+            print("     discretization limit; see the lag scan above.)")
     print("-" * 72)
     print("Caveats (RECIPE T2): featurize on LIGAND-POCKET CONTACTS (not raw Cartesian)")
     print("for binding kinetics and align on protein only; report k_on/k_off ONLY if the")
