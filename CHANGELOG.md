@@ -44,6 +44,11 @@ kinetic (path-distribution) fidelity bound.
   `resolved` only if its error is small AND it has enough events. Makes explicit which
   kinetic observables a trajectory can validate — on 25 µs NTL9 the slow folding modes
   read as not-resolved, the fast band as resolved.
+- **The contrast, measured on real NTL9, resolution-aware** (`docs/ntl9_contrast_resolved.png`):
+  to preserve the resolved-band kinetics to <1%, EPC needs ~12 bits/frame vs SZ3 ~840 /
+  ZFP ~1400 (~70-120x), and SZ3/ZFP collapse the kinetics under aggressive compression
+  (SZ3 -> 95% timescale error at 331 bits/frame). Real SZ3 1.x / ZFP 1.0.1 binaries via
+  the baselines wrappers; kinetics scored only on the band `analyze --resolution` flags.
 - **T9 gate measured on real NTL9 (both halves)** — rate
   (`docs/ntl9_temporal_redundancy.png`): at equal distortion, predictive coding saves
   ~15 bits/frame (~43%) over static per-frame coding at the 0.5 ns storage stride,

@@ -36,6 +36,30 @@ principle and contrast result** — *not* a claim that any single component is n
 Neural latent compression (MDZip, JCIM AE), error-bounded compression (SZ3/ZFP/MDZ),
 MSM-as-entropy-coder, and flow-as-density (Boltzmann Generators) are all prior art.
 
+## Results on NTL9 (measured, real trajectory)
+
+Validated on the 25 µs NTL9 fast-folder, scored **only on the kinetically resolved band**
+(`epc analyze --resolution`; the slow folding mode is sampling-limited and is *not* scored
+— see honesty constraints). All numbers are empirical, with the limits stated.
+
+- **The contrast** ([`docs/ntl9_contrast_resolved.png`](docs/ntl9_contrast_resolved.png)) —
+  to preserve the resolved kinetics to <1 % timescale error, **EPC needs ~12 bits/frame;
+  general-purpose error-bounded compressors need ~840 (SZ3) – 1400 (ZFP)** — a **~70–120×**
+  rate gap — and when pushed to aggressive compression **SZ3/ZFP collapse the kinetics**
+  (SZ3 → 95 % timescale error at 331 bits/frame). They spend bits on bounded *all-atom*
+  error, blind to which coordinates carry the slow dynamics; EPC's bound targets the
+  kinetics. (Different objectives — the honest axis is *rate needed for a given kinetic
+  fidelity*, which is what is plotted.)
+- **Predictive (T9) entropy coding** ([`docs/ntl9_temporal_redundancy.png`](docs/ntl9_temporal_redundancy.png),
+  [`docs/ntl9_t9_gate.png`](docs/ntl9_t9_gate.png)) — slow CVs stay autocorrelated (ρ≈0.98)
+  even at the 0.5 ns storage stride, so predictive coding saves **~15 bits/frame (~43 %)**
+  over static at equal distortion, and on the resolved band preserves the kinetics at
+  **~half to a third the rate** of static coding (~9× lower timescale error at matched rate).
+- **Bit allocation that respects kinetics** ([`examples/demo_bound_loss.py`](examples/demo_bound_loss.py))
+  — the differentiable path-bound (T10), trained as a loss, spends bits on the slow
+  coordinate where raw-MSE spends none (mechanism shown on a controlled synthetic;
+  inconclusive on sampling-limited NTL9, stated as such).
+
 ## Honesty constraints (do not regress)
 
 - **Dropped:** "first error-bounded MD compressor" — false; SZ/ZFP/MDZ bound
