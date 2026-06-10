@@ -33,7 +33,7 @@ dependencies = [
 # path import deeptime; the guards raise `pip install epc[kinetics]` when absent.
 kinetics = ["deeptime>=0.4.4", "matplotlib>=3.5"]
 # Test tooling.
-test = ["pytest>=7.0"]
+test = ["pytest>=7.0", "pytest-cov>=4.0"]
 # Optional alternative spline-flow implementation for the T7 comparison.
 nflows = ["nflows>=0.14"]
 
