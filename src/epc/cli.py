@@ -52,9 +52,7 @@ def cmd_compress(args):
         keep_frac=args.keep_frac, epochs=args.epochs, nstates=args.nstates,
         lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
         n_bits=args.n_bits, streaming=args.streaming, chunk=args.chunk,
-        entropy=args.entropy)
-    # flow opt-in tag (T7 wires the spline alternative; cv/entropy handled above)
-    art.flow_kind = args.flow
+        entropy=args.entropy, flow_kind=args.flow)
     print_report(report)
     save_artifact(art, args.out)
     print("  artifact written      : %s" % args.out)

@@ -49,7 +49,7 @@ def kl_1d(p, q, bins):
 
 def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, epochs,
                        nstates, lag, stride, dt_ps, lat_bits, n_bits, seed, verbose,
-                       entropy="gaussian"):
+                       entropy="gaussian", flow_kind="realnvp"):
     """Shared post-CV core: flow density -> IGFS -> entropy code -> retained MSM ->
     path bound -> full-atom residual -> Artifact. ``fetch_kept(global_indices)``
     returns the aligned flat coords (n_keep, 3N) for the kept frames (in-RAM slice for
@@ -61,11 +61,17 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     run_lengths = [c.shape[0] for c in CV_runs]
     T_total = CV_all.shape[0]
 
-    # --- stage 2: flow density on the CVs ---
+    # --- stage 2: flow density on the CVs (RealNVP default; spline = T7) ---
+    if flow_kind == "spline":
+        from .spline_flow import SplineFlow
+        flow = SplineFlow(cv_dim, hidden=64, n_layers=10, n_bins=8)
+        flow_arch = {"dim": cv_dim, "hidden": 64, "n_layers": 10, "n_bins": 8}
+    else:
+        flow = RealNVP(cv_dim, hidden=64, n_layers=10)
+        flow_arch = {"dim": cv_dim, "hidden": 64, "n_layers": 10}
     if verbose:
-        print("  training flow on %d-D CVs ..." % cv_dim)
-    flow = RealNVP(cv_dim, hidden=64, n_layers=10).fit(
-        CV_all, epochs=epochs, batch=1024, verbose=verbose, seed=seed)
+        print("  training %s flow on %d-D CVs ..." % (flow_kind, cv_dim))
+    flow = flow.fit(CV_all, epochs=epochs, batch=1024, verbose=verbose, seed=seed)
     with torch.no_grad():
         z_all = flow.forward(torch.as_tensor(CV_all))[0].numpy()
 
@@ -151,8 +157,8 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         run_lengths=run_lengths, dtraj=labels, centers=centers, counts=C,
         T_msm=T_msm, n_states=nstates, lag=lag,
         stride=stride, dt_ps=dt_ps, dt_strided_ns=dt_strided_ns,
-        flow_arch={"dim": cv_dim, "hidden": 64, "n_layers": 10},
-        cv=cv_meta["cv"], flow_kind="realnvp", entropy=entropy,
+        flow_arch=flow_arch,
+        cv=cv_meta["cv"], flow_kind=flow_kind, entropy=entropy,
         tica_mean=cv_meta.get("tica_mean"), tica_eigvecs=cv_meta.get("tica_eigvecs"),
         tica_timescales=cv_meta.get("tica_timescales"),
         align_ref=ref, x_mean=cv_meta.get("x_mean"), residual=residual,
@@ -200,7 +206,7 @@ def _vampnet_cvs(aligned, lag, cv_dim, x_mean, epochs, seed, verbose):
 def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", cv_dim=6,
                         keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
                         dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
-                        entropy="gaussian") -> Tuple[Artifact, dict]:
+                        entropy="gaussian", flow_kind="realnvp") -> Tuple[Artifact, dict]:
     """In-RAM, run-aware flow-based EPC on a list of (T_i, N, 3) arrays (nm). ``cv`` is
     the collective-variable method: 'tica' (linear, default) or 'vampnet' (T6)."""
     ref = None
@@ -218,13 +224,13 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", cv_dim=6,
                               cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
                               lat_bits=lat_bits, n_bits=n_bits, seed=seed,
-                              verbose=verbose, entropy=entropy)
+                              verbose=verbose, entropy=entropy, flow_kind=flow_kind)
 
 
 def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_dim=6,
                        keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
-                       dt_ps=100.0, lat_bits=14, n_bits=4, seed=0,
-                       verbose=True, entropy="gaussian") -> Tuple[Artifact, dict]:
+                       dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
+                       entropy="gaussian", flow_kind="realnvp") -> Tuple[Artifact, dict]:
     """T5: out-of-core EPC. ``chunk_factory()`` returns a FRESH iterator of (T_c, N, 3)
     coordinate chunks (e.g. from md.iterload). The trajectory is treated as ONE
     continuous run; the whole thing is never held in RAM -- only the small CVs and the
@@ -285,13 +291,13 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
                               cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs,
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
                               lat_bits=lat_bits, n_bits=n_bits, seed=seed,
-                              verbose=verbose, entropy=entropy)
+                              verbose=verbose, entropy=entropy, flow_kind=flow_kind)
 
 
 def run_epc(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.10,
             epochs=300, nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, n_bits=4,
             seed=0, streaming=False, chunk=2000, entropy="gaussian",
-            verbose=True) -> Tuple[Artifact, dict]:
+            flow_kind="realnvp", verbose=True) -> Tuple[Artifact, dict]:
     """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based EPC.
     ``cv`` = 'tica' (default) or 'vampnet' (T6). ``streaming=True`` uses the out-of-core
     path (chunked md.iterload; TICA only)."""
@@ -311,7 +317,7 @@ def run_epc(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.1
     sel = heavy_indices(topo)
     kw = dict(cv_dim=cv_dim, keep_frac=keep_frac, epochs=epochs, nstates=nstates,
               lag=lag, stride=stride, dt_ps=dt_ps, lat_bits=lat_bits, n_bits=n_bits,
-              seed=seed, verbose=verbose, entropy=entropy)
+              seed=seed, verbose=verbose, entropy=entropy, flow_kind=flow_kind)
     if streaming:
         def factory():
             return (np.asarray(ch.xyz, dtype=np.float64) for ch in
