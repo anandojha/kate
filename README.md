@@ -1,5 +1,10 @@
 # epc — Ensemble-Preserving Compression of MD trajectories, with a kinetic bound
 
+[![CI](https://github.com/anandojha/epc/actions/workflows/ci.yml/badge.svg)](https://github.com/anandojha/epc/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
+[![coverage 99%](https://img.shields.io/badge/coverage-99%25-brightgreen.svg)](#tests)
+
 > **Thesis.** Ensemble-preserving compression does **not** preserve kinetics. Two
 > ensembles with identical stationary distributions can have arbitrarily different
 > rates. EPC adds a **path-distribution (trajectory) bound** —
@@ -10,8 +15,13 @@
 This repo packages a tested research codebase as an installable library + CLI: a
 classical analysis-native codec, a from-scratch RealNVP normalizing flow, the
 flow-based EPC codec, the **kinetic path bound** (the novel piece), and a
-[deeptime](https://github.com/deeptime-ml/deeptime) MSM wrapper. `RECIPE.txt` is the
-authoritative spec; `RELATED_WORK.txt` lists prior work and baselines.
+[deeptime](https://github.com/deeptime-ml/deeptime) MSM wrapper. `RELATED_WORK.txt`
+lists the prior work and baselines this builds on and differentiates against.
+
+```bash
+pip install git+https://github.com/anandojha/epc.git          # core
+pip install "epc[kinetics] @ git+https://github.com/anandojha/epc.git"  # + deeptime
+```
 
 ## What is honestly new
 
@@ -26,7 +36,7 @@ principle and contrast result** — *not* a claim that any single component is n
 Neural latent compression (MDZip, JCIM AE), error-bounded compression (SZ3/ZFP/MDZ),
 MSM-as-entropy-coder, and flow-as-density (Boltzmann Generators) are all prior art.
 
-## Honesty constraints (do not regress — see `RECIPE.txt` §5)
+## Honesty constraints (do not regress)
 
 - **Dropped:** "first error-bounded MD compressor" — false; SZ/ZFP/MDZ bound
   coordinates/QoI already. The genuine novelty is the **observable-space (KL/Pinsker)
@@ -98,9 +108,9 @@ Module map: `compress = runner.py/codec.py`, `decompress = codec.py (+T4 residua
 The artifact stores the run-aware **all-frame dtraj + k-means centers** (not just one
 count matrix), so `analyze`/`benchmark` can re-estimate the MSM at **any** lag.
 
-## Sanity checks (RECIPE §2 — all pass on CPU)
+## Sanity checks (all pass on CPU)
 
-| RECIPE command            | here                                  | checks |
+| original script           | here (packaged)                       | checks |
 |---------------------------|---------------------------------------|--------|
 | `python epc_flow.py`      | `python -m epc.flow`                  | invertibility ~1e-6, density ~1, wells recovered |
 | `python demo_pathbound.py`| `python examples/demo_pathbound.py`   | ensemble term ~0 for both chains; transition term large for the ensemble-only chain |
@@ -117,7 +127,7 @@ The **crude classical estimator** in `kinetic_codec` (a single-lag `(C+C^T)/2` M
 TICA of aligned **Cartesian** coordinates) is featurization-limited and its recovered
 timescales are **library-version sensitive** — on the newest numpy/scipy/sklearn the
 synthetic demo's slow timescales are under-resolved (the leading TICA mode on raw
-Cartesian is spurious). This is expected and is exactly why the RECIPE makes deeptime
+Cartesian is spurious). This is expected and is exactly why we make deeptime
 the published path: implied timescales are a **lower bound that converges upward with
 lag** (Prinz et al.), so the rigorous kinetics come from a **deeptime reversible-MLE
 MSM + lag scan** (`epc analyze`, version-stable) and, for nonlinear slow CVs, from
@@ -126,14 +136,14 @@ flow, the EPC pipeline, and the thermodynamics (state populations) are unaffecte
 
 ## Build targets (all implemented)
 
-Classical / scaling track — `RECIPE.txt` §4:
+Classical / scaling track:
 - **T1 ✓** path bound wired into the runner + `epc bound` (pure-numpy contrast scorer)
 - **T2 ✓** production kinetics via deeptime (`epc analyze`: lag scan, Bayesian bars)
 - **T3 ✓** baseline-comparison harness (`epc benchmark`, the contrast figure)
 - **T4 ✓** full-atom reconstruction (`decompress --full-atom`, per-state dithered residual)
 - **T5 ✓** scale to 419k→1M frames (`compress --streaming`, streaming TICA, multi-pass)
 
-Neural-ML track — `RECIPE.txt` §4b (built in order **T8 → T6 → T7**, the flow stays
+Neural-ML track (built in order **T8 → T6 → T7**, the flow stays
 invertible and the bound intact; **no lossy CNN autoencoder**):
 - **T8 ✓** temporal + learned-entropy model (`--entropy temporal`) — codes latents
   against a causal learned conditional instead of the fixed N(0,I) base; changes only
@@ -168,7 +178,7 @@ src/epc/        flow.py codec.py kinetic_codec.py pathbound.py kinetics_deeptime
                 benchmark.py baselines.py temporal_prior.py vampnet_cv.py spline_flow.py)
 tests/          pytest suite (torch/deeptime tests use importorskip)
 examples/       demo_pathbound.py demo_kinetic_codec.py demo_epc.py  (the §2 checks)
-RECIPE.txt      authoritative build spec       RELATED_WORK.txt  prior work + baselines
+RELATED_WORK.txt  prior work + baselines this builds on and differentiates against
 ```
 
 The reference clones (`MDZip/`, `SZ3/`, `zfp/`, `deeptime/`, `bgflow/`, `bgmol/`,

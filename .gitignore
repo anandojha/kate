@@ -11,6 +11,9 @@ awesome-AI4MolConformation-MD/
 # --- the pre-migration flat package (removed after equivalence is verified) ---
 epc_package/
 
+# --- internal build manual (kept private: candid notes + cluster data path) ---
+RECIPE.txt
+
 # --- Python environment / build ---
 .venv/
 venv/

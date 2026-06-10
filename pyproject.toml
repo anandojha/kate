@@ -8,14 +8,25 @@ version = "0.1.0"
 description = "Ensemble-Preserving Compression of MD trajectories, with a kinetic (path-distribution) fidelity bound"
 readme = "README.md"
 requires-python = ">=3.9"
-# License intentionally left UNSPECIFIED here (decide before any public release).
-# We import third-party libraries and reimplement algorithms from their papers; we
-# do not vendor anyone's source, so no third-party license is inherited. See README
-# "Citation vs license compliance".
-authors = [{ name = "A. Ojha" }]
+license = { text = "MIT" }
+authors = [{ name = "Anand Ojha", email = "anandojha.002@gmail.com" }]
 keywords = [
     "molecular-dynamics", "compression", "markov-state-model",
     "normalizing-flow", "kinetics", "trajectory",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
 ]
 
 # Core: enough to run `epc compress`, `epc decompress`, and `epc bound`.
@@ -39,6 +50,12 @@ nflows = ["nflows>=0.14"]
 
 [project.scripts]
 epc = "epc.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/anandojha/epc"
+Repository = "https://github.com/anandojha/epc"
+Issues = "https://github.com/anandojha/epc/issues"
+Changelog = "https://github.com/anandojha/epc/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
