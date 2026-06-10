@@ -208,9 +208,26 @@ def cmd_analyze(args):
 
 
 def cmd_benchmark(args):
-    raise SystemExit(
-        "`epc benchmark` (EPC vs MDZip/SZ3/ZFP contrast, scored by the path bound) is "
-        "wired in build target T3.")
+    """T3 contrast: load the DCD, round-trip it through each method, score each
+    method's kinetic fidelity against the original MSM, and plot the contrast."""
+    import numpy as np
+    import mdtraj as md
+    from .benchmark import run_benchmark
+    from .inspect_traj import heavy_indices
+
+    methods = [m.strip() for m in args.methods.split(",") if m.strip()]
+    topo = md.load_topology(args.top)
+    sel = heavy_indices(topo)
+    chunks = [np.asarray(ch.xyz, dtype=np.float64) for ch in
+              md.iterload(args.dcd, top=args.top, chunk=2000,
+                          atom_indices=sel, stride=args.stride)]
+    coords = np.concatenate(chunks, 0)
+    dt = args.stride * args.dt_ps / 1000.0
+    print("=" * 84)
+    print("BENCHMARK  %s  (%d frames, %d heavy atoms, stride %d)"
+          % (args.dcd, coords.shape[0], len(sel), args.stride))
+    run_benchmark([coords], methods=methods, lag=args.lag, nstates=args.nstates,
+                  cv_dim=args.cv_dim, dt_strided_ns=dt, out=args.out)
 
 
 # ----------------------------------------------------------------------------- #
@@ -262,9 +279,15 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--L", type=int, default=None, help="trajectory length for the path KL")
     b.set_defaults(func=cmd_bound)
 
-    k = sub.add_parser("benchmark", help="TOP DCD -> contrast table+plot [T3]")
+    k = sub.add_parser("benchmark", help="TOP DCD -> contrast table+plot (EPC vs baselines)")
     k.add_argument("top"); k.add_argument("dcd")
-    k.add_argument("--methods", default="epc,sz3,zfp,mdzip")
+    k.add_argument("--methods", default="epc,sz3,zfp,mdzip",
+                   help="comma list: epc, sz3, zfp, mdzip, shuffle, quantize")
+    k.add_argument("--stride", type=int, default=10)
+    k.add_argument("--lag", type=int, default=10)
+    k.add_argument("--nstates", type=int, default=100)
+    k.add_argument("--cv-dim", type=int, default=2)
+    k.add_argument("--dt-ps", type=float, default=100.0)
     k.add_argument("--out", default="benchmark")
     k.set_defaults(func=cmd_benchmark)
     return p
