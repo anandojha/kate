@@ -138,6 +138,16 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     full_rec = X_approx_kept + rcodec.dequantize(rq, rstep) + state_mean_R[labels_kept]
     fullatom_rmsd = float(np.sqrt(((full_rec - X_kept) ** 2)
                                   .reshape(len(kept), -1, 3).sum(2).mean()))
+    # steric validity: does the reconstruction introduce atom overlaps the original did
+    # not have? Force-field-free geometry check -- the smallest inter-atomic distance per
+    # frame (the natural floor is the bonded distance); if the reconstruction's floor
+    # drops well below the original's, decode created clashes the path bound cannot see.
+    nat = D // 3
+    orig_min = _min_interatomic(X_kept.reshape(len(kept), nat, 3), seed)
+    rec_min = _min_interatomic(full_rec.reshape(len(kept), nat, 3), seed)
+    steric = {"orig_min_nm": float(np.percentile(orig_min, 1)),
+              "rec_min_nm": float(np.percentile(rec_min, 1))}
+    steric["ok"] = bool(steric["rec_min_nm"] >= 0.9 * steric["orig_min_nm"])
 
     # --- T8: temporal learned-entropy model (rate WITH vs WITHOUT, over all frames) ---
     temporal_arch = temporal_state = None
@@ -195,7 +205,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         "kl_cv1_nats": KL, "pinsker_cv1": float(np.sqrt(KL / 2)),
         "bounded_obs_diff": obs, "pinsker_ok": bool(obs <= np.sqrt(KL / 2) + 1e-9),
         "n_keep": len(kept), "keep_frac": len(kept) / T_total, "cv_recon_err": cv_err,
-        "fullatom_rmsd": fullatom_rmsd, "n_bits": n_bits,
+        "fullatom_rmsd": fullatom_rmsd, "steric": steric, "n_bits": n_bits,
         "residual_bits": int(rq.size) * n_bits, "state_mean_bits": int(state_mean_R.size) * 32,
         "flow_bytes": flow_bytes, "coded_bytes": len(coded),
         "implied_timescales_ns": its_ns, "lag": lag, "dt_strided_ns": dt_strided_ns,
@@ -221,6 +231,22 @@ def _tica_cvs(aligned, lag, cv_dim, x_mean, verbose):
                "tica_timescales": tica.timescales_, "x_mean": tica.mean_,
                "vamp_score": None}
     return CV_runs, cv_meta
+
+
+def _min_interatomic(X3, seed, n_sample=200):
+    """Per-frame minimum inter-atomic distance (nm) over a seeded sample of frames -- the
+    floor used by the steric-validity check. O(N^2) per frame, so it samples frames."""
+    X3 = np.asarray(X3, dtype=np.float64)
+    n = len(X3)
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(n, size=min(int(n_sample), n), replace=False)
+    out = np.empty(len(idx))
+    for k, f in enumerate(idx):
+        P = X3[f]
+        d2 = ((P[:, None, :] - P[None, :, :]) ** 2).sum(-1)
+        np.fill_diagonal(d2, np.inf)
+        out[k] = np.sqrt(d2.min())
+    return out
 
 
 def _contact_cvs(coords_runs, lag, cv_dim, verbose, max_atoms=64, sep=2):
@@ -430,6 +456,11 @@ def print_report(report: dict) -> None:
           % (r["n_keep"], r["frames"], 100 * r["keep_frac"]))
     print("  max CV recon error    : %.2e (slow modes; quantization-limited)"
           % r["cv_recon_err"])
+    if "steric" in r:
+        s = r["steric"]
+        print("  steric validity       : recon min-dist %.4f nm vs orig %.4f nm (1st pctile) -- %s"
+              % (s["rec_min_nm"], s["orig_min_nm"],
+                 "OK (no new clashes)" if s["ok"] else "WARNING: reconstruction adds atom overlaps"))
     print("  full-atom RMSD        : %.4e nm (T4 residual recovers the fast modes; %d-bit)"
           % (r["fullatom_rmsd"], r["n_bits"]))
     print("ARTIFACT (ensemble + kinetics model + full-atom residual)")
