@@ -5,7 +5,7 @@ The external compressors GLIDE is benchmarked against (the T3 contrast), plus lo
 "pseudo-baselines" so the contrast harness runs end-to-end ANYWHERE.
 
 External baselines (MDZip / SZ3 / ZFP) build and run in their OWN environments and on
-the cluster, where the trypsin-benzamidine data lives (see RELATED_WORK.txt). We do
+the cluster, where the trypsin-benzamidine data lives. We do
 NOT vendor their source -- we shell out to them as subprocesses. Each wrapper locates
 the tool via an env var (or PATH) and raises `BaselineUnavailable` with a clear
 message if it is not configured here. The subprocess command structure is scaffolded;
@@ -57,8 +57,8 @@ def _require_external(method: str) -> str:
     if not path:
         raise BaselineUnavailable(
             f"baseline '{m}' is not available here. The real {m.upper()} runs in its "
-            f"own environment on the cluster; set ${_ENV.get(m, '?')} to its binary/dir "
-            f"(see RELATED_WORK.txt). This harness scaffolds the subprocess call; use a "
+            f"own environment on the cluster; set ${_ENV.get(m, '?')} to its binary/dir. "
+            f"This harness scaffolds the subprocess call; use a "
             f"local pseudo-baseline ('shuffle' / 'quantize') to demo the contrast.")
     return path
 

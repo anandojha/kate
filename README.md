@@ -17,8 +17,9 @@
 This repo packages a tested research codebase as an installable library + CLI: a
 classical analysis-native codec, a from-scratch RealNVP normalizing flow, the
 flow-based GLIDE codec, the **kinetic path bound** (the novel piece), and a
-[deeptime](https://github.com/deeptime-ml/deeptime) MSM wrapper. `RELATED_WORK.txt`
-lists the prior work and baselines this builds on and differentiates against.
+[deeptime](https://github.com/deeptime-ml/deeptime) MSM wrapper. See
+[`docs/REVIEW.md`](docs/REVIEW.md) for the prior work / baselines this builds on and
+how it differs.
 
 ```bash
 pip install git+https://github.com/anandojha/glide.git          # core
@@ -279,7 +280,7 @@ src/glide/        flow.py codec.py kinetic_codec.py pathbound.py kinetics_deepti
 tests/          pytest suite (torch/deeptime tests use importorskip)
 examples/       demo_pathbound.py demo_kinetic_codec.py demo_glide.py demo_bound_loss.py
                 (the §2 checks)
-RELATED_WORK.txt  prior work + baselines this builds on and differentiates against
+docs/           REVIEW.md (physics + competitive audit), METHODS.md, NTL9 figures
 ```
 
 The reference clones (`MDZip/`, `SZ3/`, `zfp/`, `deeptime/`, `bgflow/`, `bgmol/`,
@@ -289,7 +290,7 @@ references/baselines kept on disk and git-ignored.
 ## Baselines & data (cluster-side)
 
 MDZip / SZ3 / ZFP build and run in their own environments and are invoked as
-**subprocesses** for the `benchmark` contrast; see `RELATED_WORK.txt`. The
+**subprocesses** for the `benchmark` contrast. The
 trypsin–benzamidine trajectory (`~419,213` frames, 100 ps/frame, solvent-stripped,
 nm) lives on the cluster, not in this repo.
 

@@ -18,7 +18,7 @@ matplotlib>=3.5       # benchmark contrast plot
 pytest>=7.0
 
 # --- external baselines (NOT pip dependencies; build/run in their own envs,
-#     invoked as subprocesses for the T3 benchmark; see RELATED_WORK.txt) ---
+#     invoked as subprocesses for the T3 benchmark) ---
 # MDZip   : git clone https://github.com/PDNALab/MDZip      (torch + pytorch-lightning)
 # SZ3     : https://github.com/szcompressor/SZ3             (C/C++ build; current gen)
 # ZFP     : https://github.com/LLNL/zfp                     (C/C++ build)
