@@ -1,6 +1,6 @@
-# GLIDE — Methods and Results
+# GLIDE - Methods and Results
 
-*GLIDE — **G**enerative **L**atent **I**nvertible **D**ynamics‑preserving **E**ncoder:
+*GLIDE - **G**enerative **L**atent **I**nvertible **D**ynamics-preserving **E**ncoder:
 kinetics-preserving compression of molecular-dynamics trajectories, with a
 kinetic (path-distribution) fidelity bound. This document consolidates the method
 and the measurements obtained on the NTL9 fast-folder. Each quantitative claim is
@@ -33,7 +33,7 @@ components are motivated by it rather than constituting the primary result.
 
 ## 2. The kinetic bound (the organizing principle)
 
-Treat the trajectory as a sample from a path distribution. The Kullback–Leibler
+Treat the trajectory as a sample from a path distribution. The Kullback-Leibler
 divergence between the reference path distribution `P` and the compressed one `Q`
 factorizes into
 
@@ -74,13 +74,13 @@ loads without torch or deeptime.
 Components are reused from prior art where credibility is a concern (deeptime's reversible-MLE
 MSM, BayesianMSM, VAMPnets, streaming covariance) and reimplemented from the
 published algorithm where ownership and reproducibility are a concern (the flow, the
-Witten–Neal–Cleary range coder, the path bound, IGFS, the artifact format, the CLI).
+Witten-Neal-Cleary range coder, the path bound, IGFS, the artifact format, the CLI).
 No third-party compressor source enters the repository; SZ3/ZFP/MDZip are external
 subprocess baselines.
 
 ---
 
-## 4. The ML track (T6–T10) and its honest status
+## 4. The ML track (T6-T10) and its honest status
 
 | target | what | status |
 |---|---|---|
@@ -106,7 +106,7 @@ timescale, its 95 % confidence interval, the relative uncertainty, and the numbe
 independent events the trajectory contains (≈ T_total / t_i). A process is flagged
 *resolved* only if its Bayesian error is small and it contains sufficient events.
 
-On 25 µs NTL9 this correctly reports the slow folding mode (t₁ ≈ 30–40 µs, ≈ 0.6
+On 25 µs NTL9 this correctly reports the slow folding mode (t₁ ≈ 30-40 µs, ≈ 0.6
 events, > 30 % error) as not resolved, and the faster band (≲ 2 µs) as resolved.
 All kinetic claims below are scored only on the resolved band; the slow folding
 timescale is sampling-limited and is excluded explicitly rather than reported as if it
@@ -116,11 +116,11 @@ were trustworthy. This step is usually omitted in the MD-compression literature.
 
 ## 6. Results on NTL9 (measured)
 
-System: NTL9 fast-folder, 39 residues, 25 µs at 10 ps. Featurization: CA–CA distances
+System: NTL9 fast-folder, 39 residues, 25 µs at 10 ps. Featurization: CA-CA distances
 (|i−j| ≥ 3) → TICA slow CVs. Kinetics: deeptime reversible-MLE MSM on a common k-means
 discretization; error = mean relative error of the resolved-band implied timescales.
 
-### 6.1 The contrast — GLIDE vs SZ3/ZFP (`ntl9_contrast_resolved.png`)
+### 6.1 The contrast - GLIDE vs SZ3/ZFP (`ntl9_contrast_resolved.png`)
 
 Real SZ3 and ZFP 1.0.1 binaries were run in fixed-accuracy mode, swept over the error bound;
 each reconstruction was re-featurized, re-projected on the same TICA, discretized on
@@ -132,7 +132,7 @@ the same centers, and then scored on the resolved band.
 | SZ3 (all-atom, error-bounded) | ~840 bits/frame |
 | ZFP (all-atom, error-bounded) | ~1400 bits/frame |
 
-This corresponds to a ~70–120× rate gap. Under aggressive compression the general compressors
+This corresponds to a ~70-120× rate gap. Under aggressive compression the general compressors
 collapse the kinetics: SZ3 reaches 95 % timescale error at 331 bits/frame. They
 spend bits on bounded *all-atom* error, without regard to which coordinate combinations carry
 the slow dynamics, whereas GLIDE's bound targets the kinetics directly.
@@ -142,7 +142,7 @@ all-atom reconstruction, while GLIDE provides the kinetic model (slow CVs + MSM;
 reconstruction would add the T4 residual bits). The comparable axis is the *rate
 needed for a given kinetic fidelity*, which is the quantity plotted in the figure.
 
-### 6.2 The T9 gate — predictive entropy coding (`ntl9_temporal_redundancy.png`, `ntl9_t9_gate.png`)
+### 6.2 The T9 gate - predictive entropy coding (`ntl9_temporal_redundancy.png`, `ntl9_t9_gate.png`)
 
 *Rate half.* GLIDE compresses *slow* CVs, whose µs timescales keep them strongly
 autocorrelated (ρ ≈ 0.98) even at the 0.5 ns storage stride. At equal distortion,
@@ -162,7 +162,7 @@ static-vs-predictive comparison is a *paired* test on identical processes, so th
 relative result is robust; the predictor used here is linear AR(1)/DPCM, a
 conservative stand-in for the GRU.
 
-### 6.3 The bound-as-loss (T10) — a win and an honest negative (`examples/demo_bound_loss.py`)
+### 6.3 The bound-as-loss (T10) - a win and an honest negative (`examples/demo_bound_loss.py`)
 
 *Synthetic (mechanism).* On a controlled, well-sampled system (a low-amplitude slow
 folding coordinate hidden among high-amplitude fast noise), at equal bit budget,

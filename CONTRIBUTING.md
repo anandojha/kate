@@ -19,12 +19,12 @@ pytest --cov=glide --cov-report=term-missing   # with coverage
 
 This package owns its code. The rule:
 
-- **Reimplement from the published method** — the flow, the entropy coders, the path
+- **Reimplement from the published method** - the flow, the entropy coders, the path
   bound, IGFS, the spline flow, the temporal/predictive models. Don't paste in
   someone else's source.
-- **Import, never vendor** — `numpy/scipy/scikit-learn/torch/mdtraj` and `deeptime`
+- **Import, never vendor** - `numpy/scipy/scikit-learn/torch/mdtraj` and `deeptime`
   (the kinetics engine) are pip dependencies.
-- **Run external compressors as subprocesses** — MDZip / SZ3 / ZFP are baselines
+- **Run external compressors as subprocesses** - MDZip / SZ3 / ZFP are baselines
   located via env vars; they are never copied into the tree.
 
 This keeps the repo license-clean: we **cite** prior work, we do not **relicense** it.

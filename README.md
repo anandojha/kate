@@ -1,6 +1,6 @@
-# glide — kinetics-preserving compression of MD trajectories
+# glide - kinetics-preserving compression of MD trajectories
 
-**GLIDE** = **G**enerative **L**atent **I**nvertible **D**ynamics‑preserving **E**ncoder. It is a normalizing‑flow codec whose fidelity bound covers the kinetics in addition to the ensemble.
+**GLIDE** = **G**enerative **L**atent **I**nvertible **D**ynamics-preserving **E**ncoder. It is a normalizing-flow codec whose fidelity bound covers the kinetics in addition to the ensemble.
 
 [![CI](https://github.com/anandojha/glide/actions/workflows/ci.yml/badge.svg)](https://github.com/anandojha/glide/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -50,7 +50,7 @@ see honesty constraints). All numbers are empirical, with the limits stated.
 
 - The contrast ([`docs/ntl9_contrast_resolved.png`](docs/ntl9_contrast_resolved.png)).
   To preserve the resolved kinetics to <1 % timescale error, GLIDE needs ~12 bits/frame,
-  whereas general-purpose error-bounded compressors need ~840 (SZ3) – 1400 (ZFP), a ~70–120×
+  whereas general-purpose error-bounded compressors need ~840 (SZ3) - 1400 (ZFP), a ~70-120×
   rate gap. When pushed to aggressive compression, SZ3/ZFP collapse the kinetics
   (SZ3 reaches 95 % timescale error at 331 bits/frame). These methods spend bits on bounded all-atom
   error, blind to which coordinates carry the slow dynamics, whereas GLIDE's bound targets the
@@ -79,7 +79,7 @@ see honesty constraints). All numbers are empirical, with the limits stated.
 - "Exact / invertible" is qualified: the flow is an exact diffeomorphism and kept
   frames reconstruct exactly up to quantization, but information-gain frame
   selection (IGFS) is a lossy step, so the three together are not "exact" unqualified.
-- The validation system is trypsin–benzamidine (not the kinase runs from the
+- The validation system is trypsin-benzamidine (not the kinase runs from the
   abstract); it is used for the kinetics claims.
 - The compression ratio (~8× at 4-bit) is not the contribution; it is comparable to
   plain quantization. The differentiators are analysis-nativeness and the bound.
@@ -120,25 +120,57 @@ Provenance boundary:
   streaming covariance) and `numpy/scipy/scikit-learn/torch/mdtraj`.
 - External baselines, run as subprocesses: MDZip / SZ3 / ZFP (never vendored).
 
-## Install
+## Installation
+
+**One-line install (conda):**
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .              # core: numpy, scipy, scikit-learn, torch, mdtraj
-pip install -e ".[kinetics]"  # adds deeptime + matplotlib (analyze / benchmark / VAMPnet)
-pip install -e ".[test]"      # pytest
+git clone https://github.com/anandojha/glide.git
+cd glide
+bash install_glide.sh
+```
+
+This creates a fresh conda environment named `glide`, installs all dependencies,
+builds and installs GLIDE, and runs the test suite to verify.
+
+**Manual (conda):**
+
+```bash
+git clone https://github.com/anandojha/glide.git
+cd glide
+conda create -n glide python=3.11 -y
+conda activate glide
+conda install -c conda-forge mdtraj deeptime matplotlib -y
+pip install torch
+pip install ".[kinetics,test]"
+```
+
+**pip only:**
+
+```bash
+pip install git+https://github.com/anandojha/glide.git                       # core
+pip install "glide[kinetics] @ git+https://github.com/anandojha/glide.git"    # + deeptime
 ```
 
 `torch` is a core dependency (the flow requires it). `deeptime` is an optional
-`[kinetics]` extra: `glide compress` / `decompress` / `bound` run without it; only
-`analyze` / `benchmark` / the VAMPnet CV path import it (and raise a clear
-`pip install glide[kinetics]` if absent). Importing `glide` pulls in neither torch
-nor deeptime eagerly, as enforced by `tests/test_no_eager_torch.py`.
+`[kinetics]` extra: `glide compress`, `decompress`, and `bound` run without it; only
+`analyze`, `benchmark`, and the VAMPnet CV path import it. Importing `glide` pulls in
+neither torch nor deeptime eagerly, as enforced by `tests/test_no_eager_torch.py`.
 
-> **macOS note.** Use a fully isolated venv (as above). A `--system-site-packages`
-> venv that mixes a conda MKL numpy with pip torch's libomp can segfault from
-> duplicate OpenMP runtimes. A clean venv pulls a wheel-based numpy (Apple
-> Accelerate / OpenBLAS) and avoids it.
+## Testing
+
+```bash
+python -m pytest tests/ -v
+```
+
+## Quick start
+
+```bash
+conda activate glide
+glide compress topology.pdb trajectory.dcd -o run.glide   # compress a trajectory
+glide analyze run.glide --resolution                      # timescales + what is resolved
+glide bound run.glide reference.glide                     # kinetic-fidelity report
+```
 
 ## The target: one end-to-end tool
 
@@ -291,7 +323,7 @@ references and baselines kept on disk and git-ignored.
 
 MDZip / SZ3 / ZFP build and run in their own environments and are invoked as
 subprocesses for the `benchmark` contrast. The
-trypsin–benzamidine trajectory (`~419,213` frames, 100 ps/frame, solvent-stripped,
+trypsin-benzamidine trajectory (`~419,213` frames, 100 ps/frame, solvent-stripped,
 nm) resides on the cluster, not in this repository.
 
 The wrappers (`glide.baselines`) are pointed at the tools via environment variables:
