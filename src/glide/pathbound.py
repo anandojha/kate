@@ -148,14 +148,21 @@ def report_kinetic_fidelity(P_ref, Q_cmp, lag=1, L=None,
     if mu_ref is None: mu_ref = stationary_distribution(P_ref)
     if mu_cmp is None: mu_cmp = stationary_distribution(Q_cmp)
     total, ens, tran = two_slice_kl(P_ref, Q_cmp, mu_ref, mu_cmp)
+    ok = support_ok(P_ref, Q_cmp)
     out = {
         "lag": lag,
-        "support_ok": support_ok(P_ref, Q_cmp),
+        "support_ok": ok,
+        # When support fails (Q has a structural zero where P is positive -- e.g. a
+        # transition the compressor never reproduces) the TRUE path divergence is +inf;
+        # the clipped transition/pair/path numbers below are then only LOWER BOUNDS, and
+        # the Pinsker bounds DO NOT hold. `kinetic_bound_valid` says whether to trust them.
+        "kinetic_bound_valid": ok,
         "ensemble_kl_nats": ens,
         "transition_kl_rate_nats_per_step": tran,
+        "transition_kl_is_lower_bound": not ok,
         "two_slice_kl_nats": total,
-        "pinsker_pair_bound": pinsker(total),
-        "pinsker_ensemble_bound": pinsker(ens),
+        "pinsker_pair_bound": pinsker(total) if ok else float("inf"),
+        "pinsker_ensemble_bound": pinsker(ens),   # ensemble term never has support issues
         "its_ref": implied_timescales(P_ref, lag, k),
         "its_cmp": implied_timescales(Q_cmp, lag, k),
     }

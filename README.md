@@ -88,6 +88,21 @@ Validated on the 25 µs NTL9 fast-folder, scored **only on the kinetically resol
   the **temporal learned-entropy model (T8)** is positioned as novel here; VAMPnets,
   spline flows, MAF, equivariant flows, and learned entropy models are reused prior
   art. **Verify all method names/citations before the paper.**
+- **Not a pure-compression winner.** On rate / all-atom RMSD / speed / maturity, the
+  dedicated compressors win: SZ3 has an MD-specific spatio-temporal predictor + hard
+  per-atom error bound + zstd; ZFP has O(1) random access; MDZip's autoencoder stores
+  ~one small latent per *whole frame* and reconstructs *all* atoms (GLIDE reconstructs
+  coordinates only for the ~10% kept frames). GLIDE's real, narrow win is that it is the
+  only one that **retains kinetics** (the MSM), ships a **path-distribution bound** on
+  kinetic observables, and is **analysis-native** (the file *is* the kinetic model).
+- **MDZip is a *coordinate-RMSD* method**, not "ensemble-preserving" — its loss is
+  `sqrt(mean((recon−x)²))`. That such a method *can* damage kinetics is a correctly-
+  diagnosed hypothesis, but it is **empirical and not yet measured here**; don't assert it.
+- **The certified kinetics currently run through the hand-rolled `(C+Cᵀ)/2` estimator,
+  not deeptime's reversible MLE** (`runner.py`, `benchmark.py`, `glide bound`). That
+  estimator is reversible but statistically biased; routing the *reported* numbers through
+  `deeptime` MLE is the top open fix. See [`docs/REVIEW.md`](docs/REVIEW.md) for the full
+  internal physics/competitive audit and the prioritized roadmap.
 
 ## Citation ≠ license compliance
 

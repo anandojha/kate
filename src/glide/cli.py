@@ -151,6 +151,13 @@ def cmd_bound(args):
     print("  implied timescales cmp (Q)        : %s frames" % np.round(r["its_cmp"], 1))
     print("                          (= %s ns)" % np.round(r["its_cmp"] * dt, 1))
     print("  support_ok (path KL finite)       : %s" % r["support_ok"])
+    if not r["kinetic_bound_valid"]:
+        print("-" * 72)
+        print("  *** WARNING: support FAILED -- Q has a transition with zero probability")
+        print("      where P does not. The TRUE path divergence is +infinity, so the")
+        print("      transition / pair / path numbers above are LOWER BOUNDS only and the")
+        print("      kinetic Pinsker bound DOES NOT hold (reported as inf). This means the")
+        print("      reconstruction misses a transition the reference has -- kinetics broken.")
     print("=" * 72)
     print("Reading: the STATIC (ensemble) Pinsker bound does NOT cover kinetics; only the")
     print("PAIR / PATH bound (which includes the transition term) does. A large transition")
