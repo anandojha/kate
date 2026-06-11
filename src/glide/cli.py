@@ -242,6 +242,17 @@ def cmd_analyze(args):
             print("  -> too few transitions / disconnected states; use fewer microstates,")
             print("     a different lag, or more sampling. (Not a tool error -- a data/")
             print("     discretization limit; see the lag scan above.)")
+    if args.mfpt:
+        print("-" * 72)
+        print("METASTABLE RATES  (PCCA+ + mean first-passage times -- the k_on/k_off the")
+        print("                   path bound covers, now actually computed)")
+        try:
+            rep = kd.metastable_mfpt(dtrajs, base_lag, dt, n_meta=int(args.mfpt))
+            print(kd.format_mfpt(rep))
+        except Exception as e:
+            print("  MFPT report unavailable: the MSM/PCCA+ did not converge at lag %d (%s)."
+                  % (base_lag, type(e).__name__))
+
     if args.resolution:
         print("-" * 72)
         print("KINETIC RESOLUTION  (which processes this trajectory can actually validate)")
@@ -335,6 +346,9 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--resolution", action="store_true",
                    help="kinetic-resolution report: which processes are statistically "
                         "resolved (Bayesian CI + independent-event count)")
+    a.add_argument("--mfpt", type=int, default=0, metavar="N",
+                   help="PCCA+ into N metastable sets + mean first-passage times between "
+                        "them (the k_on/k_off rate observables; needs deeptime)")
     a.add_argument("--k", type=int, default=4, help="number of slow timescales")
     a.add_argument("--n-samples", type=int, default=100, help="Bayesian MSM samples")
     a.set_defaults(func=cmd_analyze)

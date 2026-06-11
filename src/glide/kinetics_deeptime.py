@@ -198,6 +198,54 @@ def format_resolution(report, total_us=None):
     return "\n".join(lines)
 
 
+def metastable_mfpt(dtrajs, lag, dt_ns, n_meta=2, count_mode="sliding", reversible=True):
+    """PCCA+ metastable coarse-graining + mean first-passage times between the metastable
+    sets -- the RATE observables (k_on/k_off ~ 1/MFPT) the path bound is meant to cover,
+    now actually COMPUTED from the reversible-MLE MSM rather than only bounded. Returns a
+    dict: metastable populations, the MFPT matrix in ns between sets (frames * dt_ns), and
+    the leading implied timescales in ns. This turns the abstract transition-term guarantee
+    into the rate language the field cites (deeptime mfpt is in trajectory-step units)."""
+    _require()
+    counts = TransitionCountEstimator(lagtime=int(lag),
+                                      count_mode=count_mode).fit_fetch(dtrajs)
+    counts = counts.submodel_largest()
+    msm = MaximumLikelihoodMSM(reversible=reversible).fit_fetch(counts)
+    n_meta = int(max(2, min(n_meta, msm.n_states)))
+    pcca = msm.pcca(n_meta)
+    assign = np.asarray(pcca.assignments)
+    sets = [np.where(assign == m)[0] for m in range(n_meta)]
+    pi = msm.stationary_distribution
+    meta_pop = np.array([float(pi[s].sum()) for s in sets])
+    mfpt = np.full((n_meta, n_meta), np.nan)
+    for i in range(n_meta):
+        for j in range(n_meta):
+            if i != j and len(sets[i]) and len(sets[j]):
+                mfpt[i, j] = float(msm.mfpt(sets[i], sets[j])) * float(dt_ns)   # frames->ns
+    k = int(min(n_meta - 1, msm.n_states - 1))
+    its = (msm.timescales(k=k) * float(dt_ns)) if k >= 1 else np.array([])
+    return {"n_meta": n_meta, "meta_pop": meta_pop, "mfpt_ns": mfpt, "timescales_ns": its}
+
+
+def format_mfpt(report):
+    """Pretty-print a metastable_mfpt() report (returned as a string)."""
+    n = report["n_meta"]
+    lines = ["PCCA+ metastable kinetics  (%d metastable sets, reversible-MLE MSM)" % n,
+             "  metastable populations : %s"
+             % np.array2string(report["meta_pop"], precision=3, suppress_small=True)]
+    if report["timescales_ns"].size:
+        lines.append("  leading timescales (ns): %s"
+                     % np.array2string(report["timescales_ns"], precision=1))
+    lines.append("  mean first-passage time MFPT(i->j) in ns  (rate k_ij ~ 1/MFPT):")
+    lines.append("         " + "".join("   ->S%-8d" % j for j in range(n)))
+    for i in range(n):
+        row = "    S%-3d" % i
+        for j in range(n):
+            v = report["mfpt_ns"][i, j]
+            row += "  %10s" % ("--" if (i == j or not np.isfinite(v)) else "%.1f" % v)
+        lines.append(row)
+    return "\n".join(lines)
+
+
 def msm_for_pathbound(dtrajs, lag, reversible=True):
     """Return (transition_matrix, active_state_indices) for handing to
     glide_pathbound.report_kinetic_fidelity. To compare two compressors fairly,
