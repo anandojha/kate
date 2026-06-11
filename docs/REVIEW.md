@@ -68,26 +68,26 @@ The production path (`runner.py:104-110`), the benchmark contrast (`benchmark.py
 > (IGFS↔ensemble reconciliation) and Tier 3 (compression competitiveness).
 
 **Tier 1 - correctness & honesty (address first; mostly bounded):**
-1. ✅ **DONE** - **Routed certified kinetics through deeptime's reversible MLE** (B1,
+1. [x] **DONE** - **Routed certified kinetics through deeptime's reversible MLE** (B1,
    `294feac`): `estimate_reversible_T` prefers the deeptime MLE and falls back to `(C+Cᵀ)/2`
    when deeptime is absent; runner and benchmark use it; the artifact records `msm_estimator`.
    `glide bound` remains the portable (C+Cᵀ)/2 scorer, since deeptime pulls in torch.
-2. ☐ **OPEN** - **Reconcile IGFS with the ensemble bound** (B2): reweight kept frames to
+2. [ ] **OPEN** - **Reconcile IGFS with the ensemble bound** (B2): reweight kept frames to
    the stationary measure on decode, or restate what the IGFS subset guarantees. (The
    runner already runs the valid ensemble check against flow samples; the gap is the
    `codec.py` decode_ensemble framing.)
-3. ✅ **DONE** - **`kinetic_bound_valid`** gating (B3, `2dd91fa`): `pathbound`/`cli` report
+3. [x] **DONE** - **`kinetic_bound_valid`** gating (B3, `2dd91fa`): `pathbound`/`cli` report
    the bound as invalid (Pinsker = inf) on support failure. (Still to extend to `benchmark`.)
-4. ✅ **DONE** - **Tightened claims** (`2dd91fa`): honest competitive positioning in README.
+4. [x] **DONE** - **Tightened claims** (`2dd91fa`): honest competitive positioning in README.
 
 **Tier 2 - physics rigor (high value):**
-5. ✅ **DONE** - **MFPT** reporting (B4, `4276d07`): `glide analyze --mfpt N` computes mean
+5. [x] **DONE** - **MFPT** reporting (B4, `4276d07`): `glide analyze --mfpt N` computes mean
    first-passage times between PCCA+ metastable sets (k_on/k_off ~ 1/MFPT).
-6. ✅ **DONE** - **PCCA+ metastable coarse-graining** (`4276d07`): bundled with the MFPT report.
-7. ✅ **DONE** - **Internal-coordinate (contacts) featurization** (`1ed16e6`):
+6. [x] **DONE** - **PCCA+ metastable coarse-graining** (`4276d07`): bundled with the MFPT report.
+7. [x] **DONE** - **Internal-coordinate (contacts) featurization** (`1ed16e6`):
    `glide compress --features contacts` (invariant inter-atomic distances; removes spurious
    rigid-body slow modes). Opt-in; the default remains cartesian to preserve the validated baseline.
-8. ✅ **DONE** - **Steric-validity check** (`f909185`): force-field-free min-inter-atomic-distance
+8. [x] **DONE** - **Steric-validity check** (`f909185`): force-field-free min-inter-atomic-distance
    check on decoded frames flags reconstruction-introduced atom overlaps. (A full OpenMM
    energy hook remains optional future work.)
 

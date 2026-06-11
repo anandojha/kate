@@ -59,10 +59,10 @@ kinetics; only the path-distribution (transition) term does.
 ## 3. The method (pipeline)
 
 ```
-trajectory ─► align (Kabsch, protein-only) ─► collective variables (TICA / VAMPnet)
-           ─► normalizing flow (RealNVP / spline)  ─► information-gain frame selection
-           ─► entropy coding (Gaussian / temporal / predictive)
-           ─► retained MSM  ──────────────────────────────► the .glide artifact
+trajectory -> align (Kabsch, protein-only) -> collective variables (TICA / VAMPnet)
+           -> normalizing flow (RealNVP / spline)  -> information-gain frame selection
+           -> entropy coding (Gaussian / temporal / predictive)
+           -> retained MSM  ------------------------------> the .glide artifact
 ```
 
 The compressed object also serves as the analysis substrate: the `.glide` artifact stores the

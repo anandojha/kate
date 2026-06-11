@@ -227,21 +227,21 @@ flow, the GLIDE pipeline, and the thermodynamics (state populations) are unaffec
 ## Build targets (all implemented)
 
 Classical / scaling track:
-- **T1 ✓** path bound wired into the runner + `glide bound` (pure-numpy contrast scorer)
-- **T2 ✓** production kinetics via deeptime (`glide analyze`: lag scan, Bayesian bars)
-- **T3 ✓** baseline-comparison harness (`glide benchmark`, the contrast figure)
-- **T4 ✓** full-atom reconstruction (`decompress --full-atom`, per-state dithered residual)
-- **T5 ✓** scale to 419k→1M frames (`compress --streaming`, streaming TICA, multi-pass)
+- **T1 [x]** path bound wired into the runner + `glide bound` (pure-numpy contrast scorer)
+- **T2 [x]** production kinetics via deeptime (`glide analyze`: lag scan, Bayesian bars)
+- **T3 [x]** baseline-comparison harness (`glide benchmark`, the contrast figure)
+- **T4 [x]** full-atom reconstruction (`decompress --full-atom`, per-state dithered residual)
+- **T5 [x]** scale to 419k→1M frames (`compress --streaming`, streaming TICA, multi-pass)
 
 Neural-ML track (built in order T8 → T6 → T7; the flow stays
 invertible and the bound intact, with no lossy CNN autoencoder):
-- **T8 ✓** temporal and learned-entropy model (`--entropy temporal`). Codes latents
+- **T8 [x]** temporal and learned-entropy model (`--entropy temporal`). Codes latents
   against a causal learned conditional instead of the fixed N(0,I) base; this changes only
   the code length, not the flow or the bound (exactly lossless). This is the novel ML piece.
-- **T6 ✓** learned nonlinear slow CVs via VAMPnets (`--cv vampnet`, deeptime; TICA drop-in)
-- **T7 ✓** more expressive flow (`--flow spline`, rational-quadratic neural-spline
+- **T6 [x]** learned nonlinear slow CVs via VAMPnets (`--cv vampnet`, deeptime; TICA drop-in)
+- **T7 [x]** more expressive flow (`--flow spline`, rational-quadratic neural-spline
   coupling; tighter density, same invertibility)
-- **T9 ✓ (both halves measured on NTL9)** learned
+- **T9 [x] (both halves measured on NTL9)** learned
   predictive entropy coding (`--entropy predictive`, `--predictor {gru,tcn}`), a
   lossy rate-distortion mode:
   a causal GRU predicts a conditional Gaussian for the next latent (bound-as-loss:
@@ -272,7 +272,7 @@ invertible and the bound intact, with no lossy CNN autoencoder):
   Prior art (cite, verify before paper): DPCM (Cutler 1952); learned hyperprior and
   autoregressive context models, Ballé et al., ICLR 2018 (arXiv:1802.01436); Minnen
   et al., NeurIPS 2018 (arXiv:1809.02736).
-- **T10 ✓ (mechanism shown on synthetic)** the kinetic path-bound made
+- **T10 [x] (mechanism shown on synthetic)** the kinetic path-bound made
   differentiable so it can serve as a training loss (`glide.bound_loss`): a VAMPnet-style
   soft state assignment makes the soft MSM, and the path-bound transition term
   `h(P‖Q)`, a smooth function of the network, so `loss = rate + λ·h(P‖Q)` trains a
