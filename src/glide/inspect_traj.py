@@ -1,22 +1,34 @@
 #!/usr/bin/env python
 """
-inspect_traj.py -- characterize a DCD + topology before compression.
+Trajectory and Topology Inspection
+==================================
+Background
+----------
+This module characterizes a DCD trajectory and its topology prior to
+compression.
 
-USAGE
+Usage
+-----
   python inspect_traj.py TOP DCD
   python inspect_traj.py TOP DCD --compress [--stride N] [--lag L] [--nbits B] [--nstates S]
 
-Default (inspect): frame count, atoms/residues, residue composition (flags
-non-standard residues = ligand/ion candidates), candidate atom selections, a
-units sanity check (nearest-neighbor distance -- MDTraj reports nanometers),
-the saved time step, and the RAM footprint with a 125 us extrapolation.
+The default inspection reports the frame count; atom, residue, and chain counts;
+residue composition (with non-standard residues flagged as ligand or ion
+candidates); candidate atom selections; a units sanity check based on the
+nearest-neighbor distance (MDTraj reports nanometers); the saved time step; and
+the memory footprint together with a 125 us extrapolation.
 
---compress: builds the run list (ONE continuous run unless you split it) and
-runs kinetic_codec on the (optionally strided) heavy atoms of protein+ligand,
-reporting compression, reconstruction RMSD vs per-atom RMSF, and kinetics.
+The ``--compress`` mode builds the run list (a single continuous run unless split
+manually) and runs kinetic_codec on the optionally strided heavy atoms of the
+protein and ligand, reporting the compression ratio, reconstruction RMSD relative
+to the per-atom RMSF, and the kinetics.
 
-Written for MDTraj 1.11; verify in your env: load_topology, iterload(chunk,
-stride, atom_indices), Topology.select DSL, Trajectory.xyz (nm) / .time (ps).
+Implementation notes
+--------------------
+Written for MDTraj 1.11. The following APIs should be verified in the target
+environment: load_topology; iterload(chunk, stride, atom_indices); the
+Topology.select selection language; and Trajectory.xyz (nanometers) and .time
+(picoseconds).
 """
 import argparse
 import numpy as np
@@ -43,8 +55,11 @@ def classify(name):
 
 
 def heavy_indices(topo, resnames=None):
-    """Heavy (non-H) atom indices, optionally restricted to a set of residue
-    names. Done in Python to avoid selection-DSL fragility."""
+    """Return heavy (non-hydrogen) atom indices, optionally restricted by residue.
+
+    The selection is performed in Python to avoid fragility in the selection
+    language.
+    """
     out = []
     for a in topo.atoms:
         if a.element is None or a.element.symbol == "H":
@@ -64,7 +79,7 @@ def inspect(top_path, dcd_path):
     print("  atoms / residues / chains : %d / %d / %d"
           % (topo.n_atoms, topo.n_residues, topo.n_chains))
 
-    # residue composition by class
+    # Residue composition by class.
     by_class = {"protein": [], "water": [], "ion": [], "other": []}
     name_counts = {}
     for r in topo.residues:
@@ -80,7 +95,7 @@ def inspect(top_path, dcd_path):
     else:
         print("  (no non-standard residues -- ligand may be named as standard?)")
 
-    # candidate selections
+    # Candidate atom selections.
     print("-" * 70)
     print("CANDIDATE SELECTIONS  (atom counts)")
     trials = [("protein", "protein"), ("protein & CA", "protein and name CA"),
@@ -95,7 +110,7 @@ def inspect(top_path, dcd_path):
         except Exception as e:
             print("  %-16s : (select failed: %s)" % (label, e))
 
-    # frame scan (streaming -- never holds the whole file)
+    # Frame scan; streaming, so the whole file is never held in memory.
     print("-" * 70)
     print("TRAJECTORY  (%s)" % dcd_path)
     n_frames = 0
@@ -112,7 +127,7 @@ def inspect(top_path, dcd_path):
             boxes.append(np.asarray(ch.unitcell_lengths, dtype=np.float64))
     print("  frames                    : %d" % n_frames)
 
-    # units sanity check: nearest-neighbor distance among heavy atoms, frame 0
+    # Units sanity check: nearest-neighbor distance among heavy atoms in frame 0.
     hv = heavy_indices(topo)
     nn = float("nan")
     if first_xyz is not None and len(hv) > 1:
@@ -128,7 +143,7 @@ def inspect(top_path, dcd_path):
         print("  unitcell lengths (frame0) : %s  (0 or absent => solvent stripped)"
               % np.round(b0, 3))
 
-    # save interval
+    # Save interval.
     dt_ns = None
     if times:
         t = np.concatenate(times)
@@ -148,7 +163,7 @@ def inspect(top_path, dcd_path):
                       % (dt, "" if uniform else "  (NON-uniform!)"))
                 dt_ns = dt / 1000.0
 
-    # memory footprint (stored set = heavy protein+ligand)
+    # Memory footprint; the stored set is the heavy protein and ligand atoms.
     print("-" * 70)
     print("FOOTPRINT")
     prot_lig = set(by_class["protein"]) | set(others)
@@ -178,6 +193,12 @@ def inspect(top_path, dcd_path):
 
 
 def run_compress(top_path, dcd_path, stride, lag, nbits, nstates, facts):
+    """Run kinetic_codec on the strided heavy atoms and report the results.
+
+    The compression ratio, the reconstruction RMSD relative to the per-atom RMSF,
+    and the implied timescales are printed. The ``facts`` dictionary is the output
+    of inspect().
+    """
     import mdtraj as md
     from .kinetic_codec import KineticCodec
     stored = facts["stored"]
@@ -192,7 +213,7 @@ def run_compress(top_path, dcd_path, stride, lag, nbits, nstates, facts):
         chunks.append(np.asarray(ch.xyz, dtype=np.float64))
     coords = np.concatenate(chunks, axis=0)
     print("  loaded coords             : %s (nm)" % (coords.shape,))
-    runs = [coords]   # ONE continuous run; split here if this DCD is segments
+    runs = [coords]   # One continuous run; split here if this DCD holds segments.
 
     codec = KineticCodec(tica_lag=lag, tica_dim=2, n_states=nstates,
                          msm_lag=lag, n_bits=nbits, reversible=True, seed=0)
@@ -206,10 +227,10 @@ def run_compress(top_path, dcd_path, stride, lag, nbits, nstates, facts):
           % (rep["state_bits_per_frame"], rep["msm_entropy_rate_bits_per_frame"]))
     print("  one-time side info        : %.2f MB" % (rep["side_info_bytes"] / 1e6))
 
-    # reconstruction RMSD vs per-atom RMSF (the thermal scale, in nm)
+    # Reconstruction RMSD relative to the per-atom RMSF (the thermal scale, in nm).
     orig = coords - coords.mean(1, keepdims=True)
     r = rec[0] - rec[0].mean(1, keepdims=True)
-    rmsd = np.sqrt(((orig - r) ** 2).sum(2).mean(1))   # per-frame, naive (pre-aligned)
+    rmsd = np.sqrt(((orig - r) ** 2).sum(2).mean(1))   # per-frame, pre-aligned
     rmsf = np.sqrt(((coords - coords.mean(0, keepdims=True)) ** 2).sum(2).mean(0))
     print("  mean reconstruction RMSD  : %.4f nm   (mean per-atom RMSF = %.4f nm)"
           % (rmsd.mean(), rmsf.mean()))

@@ -1,4 +1,4 @@
-"""``python -m glide`` -> the CLI."""
+"""Command-line entry point invoked by ``python -m glide``; delegates to the CLI."""
 import sys
 
 from .cli import main

@@ -1,20 +1,29 @@
 """
-spline_flow.py
-==============
-T7 -- a more expressive normalizing flow: rational-quadratic NEURAL SPLINE coupling
-(Durkan et al., "Neural Spline Flows", 2019) reimplemented from the method. A monotonic
-piecewise rational-quadratic transform is far more flexible than RealNVP's affine
-coupling, so it fits the latent density better -> a tighter KL and therefore a tighter
-Pinsker bound -- with EXACTLY the same invertibility (the spline is monotone by
-construction, with closed-form inverse). RealNVP stays the reproducible default
-(flow.RealNVP); SplineFlow is a drop-in alternative (same forward/inverse/log_prob/
-sample/fit interface) selected by `glide compress --flow spline`.
+Rational-Quadratic Neural Spline Flow
+=====================================
 
-Neural spline flows / MAF / equivariant flows are PRIOR ART -- cited, not claimed; the
-architecture is NOT the headline (the kinetic bound is). The optional ``nflows`` extra
-provides a reference implementation for cross-checking. (Stretch, not implemented here:
-an SE(3)/permutation-equivariant coupling conditioner -- a GNN, not a grid CNN -- so the
-density respects molecular symmetry.)
+Background
+----------
+This module provides a more expressive normalizing flow based on rational-quadratic
+neural-spline coupling (rational-quadratic neural spline: Durkan et al., NeurIPS
+2019), reimplemented from the published method. A monotonic piecewise
+rational-quadratic transform is substantially more flexible than the affine coupling
+of RealNVP, so it fits the latent density more closely. The improved fit yields a
+smaller Kullback-Leibler divergence and therefore a tighter Pinsker bound, while
+preserving exact invertibility: the spline is monotone by construction and admits a
+closed-form inverse.
+
+RealNVP (flow.RealNVP) remains the reproducible default. SplineFlow is a drop-in
+alternative exposing the same forward, inverse, log_prob, sample, and fit interface,
+selected via ``glide compress --flow spline``.
+
+Neural spline flows, masked autoregressive flows, and equivariant flows constitute
+prior art and are cited rather than claimed; the architecture is not the principal
+contribution, which is the kinetic bound. The optional ``nflows`` extra provides a
+reference implementation for cross-checking. An SE(3)- or permutation-equivariant
+coupling conditioner, realized as a graph neural network rather than a grid
+convolutional network so that the density respects molecular symmetry, is a possible
+extension and is not implemented here.
 """
 from __future__ import annotations
 
@@ -34,26 +43,49 @@ def _searchsorted(bin_locations, inputs):
 
 
 def _rqs(inputs, uw, uh, ud, inverse, tail_bound):
-    """Rational-quadratic spline on [-tb, tb] (Durkan et al.). inputs: (...,);
-    uw/uh/ud: (..., K)/(..., K)/(..., K-1). Returns (outputs, logabsdet)."""
+    """Evaluate the rational-quadratic spline on [-tb, tb].
+
+    Implements the monotonic rational-quadratic transform of Durkan et al.
+    (NeurIPS 2019).
+
+    Parameters
+    ----------
+    inputs : Tensor
+        Values to transform, of shape (...,).
+    uw, uh, ud : Tensor
+        Unnormalized widths, heights, and inner derivatives, of shape (..., K),
+        (..., K), and (..., K-1) respectively.
+    inverse : bool
+        If True, apply the inverse transform.
+    tail_bound : float
+        Half-width tb of the spline support.
+
+    Returns
+    -------
+    outputs : Tensor
+        Transformed values.
+    logabsdet : Tensor
+        Log absolute Jacobian determinant of the transform.
+    """
     tb = tail_bound
     K = uw.shape[-1]
-    # widths -> x-knots
+    # Convert widths to x-knot locations.
     widths = F.softmax(uw, dim=-1)
     widths = _MIN_BIN + (1 - _MIN_BIN * K) * widths
     cumw = torch.cumsum(widths, dim=-1)
     cumw = F.pad(cumw, (1, 0), value=0.0) * (2 * tb) - tb
     cumw[..., 0] = -tb; cumw[..., -1] = tb
     widths = cumw[..., 1:] - cumw[..., :-1]
-    # heights -> y-knots
+    # Convert heights to y-knot locations.
     heights = F.softmax(uh, dim=-1)
     heights = _MIN_BIN + (1 - _MIN_BIN * K) * heights
     cumh = torch.cumsum(heights, dim=-1)
     cumh = F.pad(cumh, (1, 0), value=0.0) * (2 * tb) - tb
     cumh[..., 0] = -tb; cumh[..., -1] = tb
     heights = cumh[..., 1:] - cumh[..., :-1]
-    # derivatives at the K+1 knots: pad the raw inner derivatives with the boundary
-    # constant so the boundary derivative is exactly 1 (C1 linear tails), then softplus.
+    # Derivatives at the K+1 knots. The raw inner derivatives are padded with the
+    # boundary constant so that the boundary derivative is exactly 1, giving C1-continuous
+    # linear tails, and are then passed through softplus.
     const = math.log(math.exp(1 - _MIN_DERIV) - 1)
     ud = F.pad(ud, (1, 1), value=const)
     derivs = _MIN_DERIV + F.softplus(ud)
@@ -92,7 +124,7 @@ def _rqs(inputs, uw, uh, ud, inverse, tail_bound):
 
 
 def _unconstrained_rqs(inputs, uw, uh, ud, inverse, tail_bound):
-    """RQ spline inside [-tb, tb], identity (linear) tails outside."""
+    """Apply the rational-quadratic spline on [-tb, tb] with identity linear tails outside."""
     inside = (inputs >= -tail_bound) & (inputs <= tail_bound)
     out = torch.where(inside, torch.zeros_like(inputs), inputs)
     lad = torch.zeros_like(inputs)
@@ -105,8 +137,12 @@ def _unconstrained_rqs(inputs, uw, uh, ud, inverse, tail_bound):
 
 
 class RQSplineCoupling(nn.Module):
-    """Mask-based coupling: the frozen half conditions a net producing RQ-spline
-    parameters for the active half. Invertible by construction."""
+    """Mask-based rational-quadratic spline coupling layer.
+
+    The frozen half of the coordinates conditions a network that produces the
+    rational-quadratic spline parameters for the active half. The transform is
+    invertible by construction.
+    """
 
     def __init__(self, dim, hidden, mask, num_bins=8, tail_bound=5.0):
         super().__init__()
@@ -114,7 +150,7 @@ class RQSplineCoupling(nn.Module):
         self.dim = dim
         self.K = num_bins
         self.tail_bound = tail_bound
-        n_params = 3 * num_bins - 1                    # K widths, K heights, K-1 derivs
+        n_params = 3 * num_bins - 1                    # K widths, K heights, K-1 derivatives
         self.net = nn.Sequential(
             nn.Linear(dim, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
@@ -144,8 +180,11 @@ class RQSplineCoupling(nn.Module):
 
 
 class SplineFlow(nn.Module):
-    """Drop-in replacement for flow.RealNVP using RQ-spline coupling layers. Same
-    interface (forward/inverse/log_prob/sample/fit) so codec/runner use it unchanged."""
+    """Drop-in replacement for flow.RealNVP using rational-quadratic spline coupling.
+
+    The interface (forward, inverse, log_prob, sample, fit) matches flow.RealNVP, so
+    the codec and runner use this class unchanged.
+    """
 
     def __init__(self, dim: int, hidden: int = 64, n_layers: int = 8, n_bins: int = 8):
         super().__init__()
@@ -206,7 +245,7 @@ class SplineFlow(nn.Module):
 
 
 if __name__ == "__main__":
-    # quick invertibility + density self-test (mirrors glide.flow)
+    # Invertibility and density self-test, mirroring glide.flow.
     torch.manual_seed(0)
     rng = np.random.default_rng(0)
     n = 6000

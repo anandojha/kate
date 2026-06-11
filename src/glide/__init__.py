@@ -1,26 +1,34 @@
 """
-glide -- Generative Latent Invertible Dynamics-preserving Encoder (GLIDE):
-kinetics-preserving compression of MD trajectories, with a kinetic
-(path-distribution) fidelity bound.
+Generative Latent Invertible Dynamics-Preserving Encoder
+========================================================
+Background
+----------
+GLIDE provides kinetics-preserving compression of molecular dynamics trajectories
+together with a kinetic, path-distribution fidelity bound. Ensemble-preserving
+compression does not in general preserve kinetics: two ensembles with identical
+stationary distributions may exhibit different transition rates. GLIDE addresses
+this by bounding the path-distribution divergence, which decomposes as
 
-Thesis: ensemble-preserving compression does NOT preserve kinetics. Two ensembles
-with identical stationary distributions can have different rates. GLIDE adds a
-path-distribution bound -- KL(path) = ensemble term + transition term -- so KINETIC
-observables are covered. The kinetic bound is the headline, not the architecture.
+    KL(path) = ensemble term + transition term,
 
-Import hygiene (deliberate): importing ``glide`` -- or ``from glide import pathbound``
--- pulls in NEITHER torch NOR deeptime, so the pure-numpy path (the kinetic
-``bound``) runs on a box without either installed. torch-backed pieces (flow,
-codec, runner, spline_flow, temporal_prior) and deeptime-backed pieces
-(kinetics_deeptime, vampnet_cv) are imported lazily -- only when first accessed, or
-when the CLI subcommand that needs them runs. This is enforced by
-tests/test_no_eager_torch.py.
+so that kinetic observables, and not only static ensemble averages, are covered.
+The kinetic bound is the central contribution of the package.
+
+Import hygiene
+--------------
+Importing ``glide``, including ``from glide import pathbound``, pulls in neither
+torch nor deeptime. The pure-numpy path that evaluates the kinetic ``bound``
+therefore runs on a host with neither dependency installed. The torch-backed
+components (flow, codec, runner, spline_flow, temporal_prior) and the
+deeptime-backed components (kinetics_deeptime, vampnet_cv) are imported lazily,
+on first access or when the corresponding CLI subcommand executes. This property
+is enforced by tests/test_no_eager_torch.py.
 """
 from __future__ import annotations
 
 __version__ = "0.1.0"
 
-# --- eager, pure-numpy public API (the kinetic bound; no torch, no deeptime) ---
+# Eager, pure-numpy public API for the kinetic bound; no torch, no deeptime.
 from . import pathbound  # noqa: E402  (numpy only)
 from .pathbound import (  # noqa: E402
     report_kinetic_fidelity,
@@ -32,8 +40,8 @@ from .pathbound import (  # noqa: E402
     stationary_distribution,
 )
 
-# Everything below is served lazily so that importing ``glide`` never drags in torch
-# or deeptime. name -> (submodule, attribute).
+# The following attributes are resolved lazily so that importing ``glide`` never
+# imports torch or deeptime. Each entry maps name -> (submodule, attribute).
 _LAZY = {
     "GlideCodec": ("codec", "GlideCodec"),
     "GlideArtifact": ("codec", "GlideArtifact"),

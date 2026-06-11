@@ -1,24 +1,33 @@
 """
-vampnet_cv.py
-=============
-T6 -- learned NONLINEAR slow collective variables via VAMPnets (deeptime's PyTorch
-VAMPNet). A drop-in alternative to the linear TICA CVs: train a small network lobe to
-maximize the VAMP score (the variational principle for Markov dynamics), then run the
-flow + MSM on the learned CVs instead of TICA. This is "deep learning of molecular
-kinetics" and improves the DYNAMICS term directly.
+Learned Nonlinear Slow Collective Variables (VAMPnets)
+======================================================
 
-It keeps the thesis intact: the flow on the CVs is still invertible, the full-atom
-residual stage still recovers the fast modes (via a fitted linear CV->coordinate
-decoder, CV-agnostic), and the path bound is unchanged. VAMPnets are PRIOR ART (Mardt
-et al. 2018) -- cited, not claimed; only the integration + the kinetic bound are ours.
+Background
+----------
+This module learns nonlinear slow collective variables (CVs) via VAMPnets, using
+deeptime's PyTorch VAMPNet implementation. It provides a drop-in alternative to the
+linear TICA CVs: a small network lobe is trained to maximize the VAMP score, the
+variational principle for Markov dynamics (VAMPnets: Mardt et al., Nat. Commun. 9, 5
+(2018)), after which the flow and MSM are run on the learned CVs rather than on TICA.
+This constitutes deep learning of molecular kinetics and improves the dynamics term
+directly.
 
-Featurize on LIGAND-POCKET CONTACTS (not raw Cartesian) for binding kinetics (the
-caller chooses the features). API verified against deeptime 0.4.5:
-  TrajectoryDataset(lagtime, traj) -> DataLoader
-  VAMPNet(lobe, device, learning_rate).fit(loader, n_epochs).fetch_model()
-  model.transform(traj);  VAMP(lagtime).fit_fetch(cvs).score(r=2)
+The overall design is preserved: the flow on the CVs remains invertible, the full-atom
+residual stage still recovers the fast modes through a fitted, CV-agnostic linear
+CV-to-coordinate decoder, and the path bound is unchanged. VAMPnets are prior art and
+are cited rather than claimed; only the integration and the kinetic bound are
+contributed here.
 
-Import-guarded: deeptime is the optional [kinetics] extra (torch is core).
+For binding kinetics, the features are ligand-pocket contacts rather than raw Cartesian
+coordinates; the choice of features rests with the caller. The API has been verified
+against deeptime 0.4.5:
+
+    TrajectoryDataset(lagtime, traj) -> DataLoader
+    VAMPNet(lobe, device, learning_rate).fit(loader, n_epochs).fetch_model()
+    model.transform(traj);  VAMP(lagtime).fit_fetch(cvs).score(r=2)
+
+The deeptime import is guarded: deeptime is the optional [kinetics] extra, whereas torch
+is a core dependency.
 """
 from __future__ import annotations
 
@@ -53,9 +62,12 @@ def _build_lobe(in_dim, out_dim, hidden):
 
 def vampnet_cvs(runs_feat, lag, dim, *, hidden=32, n_epochs=30, batch=256, lr=5e-3,
                 seed=0, device="cpu", verbose=False):
-    """Train a VAMPNet on a list of per-run feature arrays and return
-    (model, list_of_CV_trajectories, vamp2_score). Run-aware: lagged pairs are formed
-    within each run (ConcatDataset of per-run TrajectoryDatasets), never across seams."""
+    """Train a VAMPNet on per-run feature arrays and return the learned CVs.
+
+    Returns the tuple (model, list_of_CV_trajectories, vamp2_score). The procedure is
+    run-aware: lagged pairs are formed within each run, via a ConcatDataset of per-run
+    TrajectoryDatasets, and never across run boundaries.
+    """
     _require()
     import torch
     from torch.utils.data import DataLoader, ConcatDataset
@@ -77,8 +89,11 @@ def vampnet_cvs(runs_feat, lag, dim, *, hidden=32, n_epochs=30, batch=256, lr=5e
 
 
 def vamp_score(cvs, lag, r=2):
-    """VAMP-r score of a set of CV trajectories (run-aware list). Higher = the CVs
-    capture more of the slow dynamics. Use it to compare VAMPnet vs the TICA baseline."""
+    """Compute the VAMP-r score of a run-aware list of CV trajectories.
+
+    A higher score indicates that the CVs capture more of the slow dynamics. The score
+    is used to compare the VAMPnet CVs against the TICA baseline.
+    """
     _require()
     cvs = [np.asarray(c, dtype=np.float64) for c in cvs]
     model = VAMP(lagtime=int(lag)).fit_fetch(cvs if len(cvs) > 1 else cvs[0])

@@ -1,32 +1,40 @@
 """
-glide_flow.py
-===========
-A normalizing flow (RealNVP) built from scratch in PyTorch -- the learned density
-model at the heart of GLIDE. This is the piece the linear PCA-whitening was standing
-in for.
+Normalizing Flow Density Model (RealNVP)
+========================================
 
-Why a flow, precisely (this is the abstract's logic):
-  - It is an EXACT diffeomorphism x <-> z, so it is invertible by construction
-    (no architectural information loss), unlike a lossy autoencoder.
-  - KL divergence is invariant under it, so a divergence bound measured in the
-    Gaussian base space z transfers exactly to configuration space x -- the
-    bound stops depending on a Gaussian-reference *assumption* (which raw MD
-    violates) and becomes assumption-free.
-  - It gives a tractable density log p(x), which (a) defines the information-gain
-    signal for frame selection and (b) is the model the entropy coder codes
-    against (coding cost = -log2 p, i.e. the NLL in bits).
+Background
+----------
+This module implements a RealNVP normalizing flow in PyTorch, providing the
+learned density model used by GLIDE. It replaces the linear PCA-whitening
+employed in earlier stages.
 
-Affine coupling layer (Dinh et al. 2017): split coordinates by a binary mask b.
-The frozen half x_b conditions a network producing per-dim scale s and shift t;
-the active half is transformed y = x*exp(s)+t. log|det J| = sum(s) over the
-active dims; the inverse is closed-form. Masks alternate between layers so every
-coordinate is transformed.
+A normalizing flow is an exact diffeomorphism x <-> z and is therefore invertible
+by construction, incurring no architectural information loss, in contrast to a
+lossy autoencoder. The Kullback-Leibler divergence is invariant under such a
+transformation, so a divergence bound measured in the Gaussian base space z
+transfers exactly to configuration space x. The bound consequently no longer
+depends on a Gaussian-reference assumption, which raw molecular-dynamics data
+violate, and instead becomes assumption-free. The flow additionally provides a
+tractable density log p(x), which defines the information-gain signal used for
+frame selection and serves as the model against which the entropy coder operates,
+the coding cost being -log2 p(x), the negative log-likelihood expressed in bits.
 
-Standardization (x -> (x-mean)/std) is folded into the flow as a fixed affine
-layer, so log_prob is a proper density over the original coordinates.
+Affine coupling
+---------------
+The affine coupling layer (RealNVP: Dinh et al., ICLR 2017) partitions the
+coordinates according to a binary mask b. The frozen half x_b conditions a network
+that produces a per-dimension scale s and shift t; the active half is transformed
+as y = x * exp(s) + t. The Jacobian log-determinant is log|det J| = sum(s) over
+the active dimensions, and the inverse is available in closed form. The masks
+alternate between successive layers so that every coordinate is transformed.
 
-Tested in __main__: exact invertibility, training NLL on a 3-well mixture, the
-density integrating to ~1 on a grid, and in- vs out-of-distribution log_prob.
+Standardization, x -> (x - mean) / std, is folded into the flow as a fixed affine
+layer, so that log_prob is a proper density over the original coordinates.
+
+The self-test in __main__ verifies exact invertibility, the training negative
+log-likelihood on a three-well mixture, integration of the density to
+approximately unity on a grid, and the contrast between in-distribution and
+out-of-distribution log_prob values.
 """
 
 from __future__ import annotations
@@ -39,20 +47,21 @@ import torch.nn as nn
 class AffineCoupling(nn.Module):
     def __init__(self, dim: int, hidden: int, mask: torch.Tensor):
         super().__init__()
-        self.register_buffer("mask", mask)            # (dim,) of 0/1
+        self.register_buffer("mask", mask)            # binary mask of shape (dim,)
         self.net = nn.Sequential(
             nn.Linear(dim, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
             nn.Linear(hidden, 2 * dim),
         )
-        # zero-init the last layer => the layer starts as the identity (stable start)
+        # Zero-initialize the final layer so the layer begins as the identity map,
+        # which provides a numerically stable starting point.
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
 
     def _st(self, x_frozen):
         s, t = self.net(x_frozen).chunk(2, dim=-1)
         comp = 1.0 - self.mask
-        s = torch.tanh(s) * comp        # bounded scale, only on the active half
+        s = torch.tanh(s) * comp        # bounded scale applied to the active half
         t = t * comp
         return s, t
 
@@ -60,7 +69,7 @@ class AffineCoupling(nn.Module):
         xf = x * self.mask
         s, t = self._st(xf)
         y = xf + (1.0 - self.mask) * (x * torch.exp(s) + t)
-        return y, s.sum(-1)             # logdet = sum of active-dim log-scales
+        return y, s.sum(-1)             # log|det J| is the sum of active-dim log-scales
 
     def inverse(self, y):
         yf = y * self.mask
@@ -84,7 +93,7 @@ class RealNVP(nn.Module):
 
     # ----- change of variables -----
     def forward(self, x):
-        """x -> base z, returning (z, total logdet of x->z)."""
+        """Map x to the base variable z and return (z, total log|det J| of x -> z)."""
         z = (x - self.mean_) / self.std_
         logdet = -torch.log(self.std_).sum().expand(x.shape[0]).clone()
         for layer in self.layers:
@@ -93,15 +102,21 @@ class RealNVP(nn.Module):
         return z, logdet
 
     def inverse(self, z):
-        """base z -> x (exact)."""
+        """Map the base variable z back to x exactly."""
         x = z
         for layer in reversed(self.layers):
             x = layer.inverse(x)
         return x * self.std_ + self.mean_
 
     def log_prob(self, x):
+        """Evaluate log p(x) via the change-of-variables identity.
+
+        The density follows from log p(x) = log p(z) + log|det J|, where p(z) is the
+        standard-normal base density and log|det J| is the accumulated Jacobian
+        log-determinant of the forward map.
+        """
         z, logdet = self.forward(x)
-        base = -0.5 * (z ** 2 + math.log(2 * math.pi))   # standard normal, per dim
+        base = -0.5 * (z ** 2 + math.log(2 * math.pi))   # standard normal, per dimension
         return base.sum(-1) + logdet
 
     @torch.no_grad()
@@ -138,7 +153,8 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     rng = np.random.default_rng(0)
 
-    # --- a known target: 3 wells along dim0 (like a slow CV), noise on dim1 ---
+    # Known target: three wells along dimension 0, analogous to a slow collective
+    # variable, with Gaussian noise on dimension 1.
     n = 12000
     comp = rng.integers(0, 3, size=n)
     centers = np.array([-2.0, 0.0, 2.0])
@@ -148,7 +164,7 @@ if __name__ == "__main__":
 
     flow = RealNVP(dim=2, hidden=64, n_layers=10)
 
-    # (1) exact invertibility BEFORE training (identity-init) and AFTER
+    # (1) Exact invertibility before training (identity initialization) and after.
     xt = torch.as_tensor(X[:512])
     z, _ = flow.forward(xt)
     err0 = (flow.inverse(z) - xt).abs().max().item()
@@ -161,7 +177,8 @@ if __name__ == "__main__":
     print("\nINVERTIBILITY  max|inverse(forward(x))-x|:  before=%.2e  after=%.2e"
           % (err0, err1))
 
-    # (2) does the learned density integrate to ~1? (grid quadrature)
+    # (2) Verify that the learned density integrates to approximately unity by grid
+    # quadrature.
     gx = np.linspace(-5, 5, 200)
     gy = np.linspace(-3, 3, 120)
     XX, YY = np.meshgrid(gx, gy)
@@ -172,7 +189,7 @@ if __name__ == "__main__":
     mass = dens.sum() * cell
     print("DENSITY normalization  integral p(x) dx ~ %.4f  (should be ~1)" % mass)
 
-    # (3) in- vs out-of-distribution log-prob
+    # (3) In-distribution versus out-of-distribution log-probability.
     with torch.no_grad():
         lp_in = flow.log_prob(torch.as_tensor(X[:2000])).mean().item()
         oob = torch.as_tensor(rng.uniform([-5, -3], [5, 3], size=(2000, 2)),
@@ -181,7 +198,7 @@ if __name__ == "__main__":
     print("LOG-PROB  in-distribution=%.3f   uniform-random=%.3f   (in >> oob)"
           % (lp_in, lp_oob))
 
-    # (4) recovered well structure from samples
+    # (4) Recovery of the well structure from samples.
     with torch.no_grad():
         s = flow.sample(20000).numpy()
     frac = [(np.abs(s[:, 0] - c) < 1.0).mean() for c in centers]

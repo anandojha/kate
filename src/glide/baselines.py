@@ -1,26 +1,37 @@
 """
-baselines.py
-============
-The external compressors GLIDE is benchmarked against (the T3 contrast), plus local
-"pseudo-baselines" so the contrast harness runs end-to-end ANYWHERE.
+Baseline Compressors for the Kinetic-Fidelity Contrast
+======================================================
+Background
+----------
+This module provides the external compressors against which GLIDE is benchmarked
+(the T3 contrast), together with local pseudo-baselines that allow the contrast
+harness to run end-to-end in any environment.
 
-External baselines (MDZip / SZ3 / ZFP) build and run in their OWN environments and on
-the cluster, where the trypsin-benzamidine data lives. We do
-NOT vendor their source -- we shell out to them as subprocesses. Each wrapper locates
-the tool via an env var (or PATH) and raises `BaselineUnavailable` with a clear
-message if it is not configured here. The subprocess command structure is scaffolded;
-verify each tool's exact CLI/API before a real run (their flags vary by version).
+External baselines
+------------------
+The external baselines (MDZip, SZ3, ZFP) build and run in their own environments
+on the cluster, where the trypsin-benzamidine data resides. Their source is not
+vendored; each is invoked as a subprocess. Every wrapper locates the tool through
+an environment variable (or PATH) and raises ``BaselineUnavailable`` with an
+explanatory message when the tool is not configured. The subprocess command
+structure is scaffolded, and each tool's command-line interface should be
+verified before a production run, as the flags vary by version.
 
-Local pseudo-baselines (run anywhere, no external tools) DEMONSTRATE the contrast:
-  * 'shuffle'  : i.i.d. resample of frames -> the ENSEMBLE is preserved EXACTLY while
-                 all temporal correlation is destroyed. The extreme "ensemble
-                 preserved, kinetics not" -- what an ensemble-only method approaches.
-  * 'quantize' : round coordinates to a coarse grid -> a pointwise-bounded round-trip
-                 (the SZ/ZFP family idea) that blurs state boundaries -> kinetics drift
-                 while the ensemble is ~preserved.
+Local pseudo-baselines
+---------------------
+The local pseudo-baselines run anywhere without external tools and demonstrate
+the contrast:
+  * 'shuffle'  : an independent resample of frames that preserves the ensemble
+                 exactly while destroying all temporal correlation. This is the
+                 limiting case of an ensemble-preserving, kinetics-destroying
+                 method, which an ensemble-only method approaches.
+  * 'quantize' : rounding of coordinates to a coarse grid, a pointwise-bounded
+                 round-trip in the SZ/ZFP family that blurs state boundaries so
+                 the kinetics drift while the ensemble is approximately preserved.
 
-These are stand-ins for the figure mechanics, NOT claims about the real baselines'
-numbers -- those come from the actual MDZip/SZ3/ZFP runs on the cluster.
+These pseudo-baselines stand in for the figure mechanics and are not claims about
+the real baselines' numbers, which come from the MDZip/SZ3/ZFP runs on the
+cluster.
 """
 from __future__ import annotations
 
@@ -36,7 +47,7 @@ class BaselineUnavailable(RuntimeError):
     """Raised when an external baseline tool is not configured in this environment."""
 
 
-# env var that points at each external tool (binary or repo dir)
+# Environment variable pointing at each external tool (binary or repository dir).
 _ENV = {"sz3": "GLIDE_SZ3_BIN", "zfp": "GLIDE_ZFP_BIN", "mdzip": "GLIDE_MDZIP_DIR"}
 _LOCAL = {"glide", "shuffle", "quantize"}
 
@@ -64,33 +75,36 @@ def _require_external(method: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# local pseudo-baselines
+# Local pseudo-baselines
 # --------------------------------------------------------------------------- #
 def pseudo_shuffle(coords: np.ndarray, seed: int = 0) -> np.ndarray:
-    """i.i.d. frame resample: identical ensemble, destroyed kinetics."""
+    """Resample frames independently, preserving the ensemble but destroying kinetics."""
     rng = np.random.default_rng(seed)
     idx = rng.integers(0, coords.shape[0], size=coords.shape[0])
     return np.asarray(coords)[idx]
 
 
 def pseudo_quantize(coords: np.ndarray, decimals: int = 1) -> np.ndarray:
-    """Coordinate-bounded round-trip (mimics SZ/ZFP pointwise error): coarse rounding
-    blurs state boundaries -> kinetics drift while the ensemble is ~preserved."""
+    """Apply a coordinate-bounded round-trip mimicking SZ/ZFP pointwise error.
+
+    Coarse rounding blurs state boundaries so the kinetics drift while the
+    ensemble is approximately preserved.
+    """
     return np.round(np.asarray(coords), decimals=decimals)
 
 
 # --------------------------------------------------------------------------- #
-# external baselines (subprocess; cluster-side). Scaffolds -- VERIFY each CLI.
+# External baselines (subprocess, cluster-side). Scaffolds; verify each CLI.
 # --------------------------------------------------------------------------- #
 def run_sz3(coords: np.ndarray, abs_err: float = 1e-2) -> np.ndarray:
-    """SZ3 pointwise error-bounded round-trip on float32 coords (ABS error mode)."""
+    """Run an SZ3 pointwise error-bounded round-trip on float32 coords (ABS mode)."""
     binp = _require_external("sz3")
     arr = np.ascontiguousarray(coords, dtype=np.float32)
     n = arr.size
     with tempfile.TemporaryDirectory() as d:
         raw = os.path.join(d, "in.f32"); comp = raw + ".sz"; dec = os.path.join(d, "out.f32")
         arr.tofile(raw)
-        # NB: verify SZ3's current CLI flags before a real run.
+        # Verify SZ3's current command-line flags before a production run.
         subprocess.run([binp, "-f", "-z", comp, "-i", raw, "-M", "ABS",
                         str(abs_err), "-1", str(n)], check=True)
         subprocess.run([binp, "-f", "-x", dec, "-s", comp, "-1", str(n)], check=True)
@@ -99,7 +113,7 @@ def run_sz3(coords: np.ndarray, abs_err: float = 1e-2) -> np.ndarray:
 
 
 def run_zfp(coords: np.ndarray, abs_err: float = 1e-2) -> np.ndarray:
-    """ZFP fixed-accuracy round-trip on float32 coords."""
+    """Run a ZFP fixed-accuracy round-trip on float32 coords."""
     binp = _require_external("zfp")
     arr = np.ascontiguousarray(coords, dtype=np.float32)
     with tempfile.TemporaryDirectory() as d:
@@ -113,7 +127,7 @@ def run_zfp(coords: np.ndarray, abs_err: float = 1e-2) -> np.ndarray:
 
 
 def run_mdzip(coords: np.ndarray, top: str = None, **kw) -> np.ndarray:
-    """MDZip autoencoder round-trip (its own torch/lightning env on the cluster)."""
+    """Run an MDZip autoencoder round-trip in its own torch/lightning env on the cluster."""
     _require_external("mdzip")
     raise BaselineUnavailable(
         "MDZip runs in its own env on the cluster (compress(traj,top,...) / decompress"
@@ -121,8 +135,11 @@ def run_mdzip(coords: np.ndarray, top: str = None, **kw) -> np.ndarray:
 
 
 def reconstruct(method: str, coords: np.ndarray, **kw) -> np.ndarray:
-    """Round-trip `coords` (T, N, 3) through a baseline; returns reconstructed coords.
-    Local pseudo-baselines run anywhere; external ones require their tool."""
+    """Round-trip ``coords`` (T, N, 3) through a baseline and return the result.
+
+    Local pseudo-baselines run in any environment; external baselines require
+    their configured tool.
+    """
     m = method.lower()
     if m == "shuffle":
         return pseudo_shuffle(coords, seed=kw.get("seed", 0))

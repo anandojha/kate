@@ -1,21 +1,35 @@
 #!/usr/bin/env python
 """
-runner.py -- flow-based GLIDE on real (or array) trajectories, and the backend for
-``glide compress``. Reduces to a few TICA collective variables FIRST and trains the
-flow on those (the abstract's stage-1 ordering), tractable at 3N ~ 5000.
+Flow-Based GLIDE Trajectory Compression Runner
+==============================================
+This module provides the execution backend for ``glide compress``, applying
+flow-based GLIDE to molecular-dynamics trajectories supplied either as in-memory
+arrays or as DCD files. Dimensionality reduction to a small set of TICA collective
+variables precedes flow training, which keeps the procedure tractable for systems
+of size 3N of order 5000.
 
-Three entry points share one post-CV core (``_assemble_artifact``):
-  * compress_trajectory(coords_runs)  -- in-RAM, run-aware (the default).
-  * compress_streaming(chunk_factory)  -- T5: STREAMING TICA (partial_fit, chunked) so
-    the CV step scales past RAM; the whole trajectory is never held (only the small
-    CVs and the sparse kept frames are). Multi-pass: (1) fit streaming TICA, (2)
-    transform -> CVs + train flow + IGFS + MSM, (3) read only the KEPT frames for the
-    residual. Streaming TICA == batch TICA exactly (cross-chunk lagged pairs kept).
-  * run_glide(top, dcd[, streaming=True])  -- the DCD loader for both.
+Entry points
+------------
+Three entry points share a common post-collective-variable core, ``_assemble_artifact``:
 
-The path bound is wired in (T1): for GLIDE the retained MSM Q == the full-data reference
-P, so the transition term is ~0 by construction. The full-atom residual stage (T4)
-recovers the fast modes TICA discards.
+  * ``compress_trajectory(coords_runs)`` operates in memory and is run-aware. It is
+    the default path.
+  * ``compress_streaming(chunk_factory)`` performs out-of-core compression using
+    streaming TICA (chunked ``partial_fit``), so the collective-variable step scales
+    beyond available memory. The full trajectory is never retained; only the
+    low-dimensional collective variables and the sparse set of kept frames are held.
+    The procedure is multi-pass: a streaming TICA fit, a transform pass producing
+    collective variables followed by flow training, frame selection, and MSM
+    estimation, and a final pass that reads only the kept frames for the residual.
+    Streaming TICA reproduces batch TICA exactly, since cross-chunk lagged pairs are
+    retained.
+  * ``run_glide(top, dcd[, streaming=True])`` provides the DCD loader for both paths.
+
+Kinetic bound
+-------------
+The path-distribution bound is incorporated directly. For GLIDE the retained MSM Q
+equals the full-data reference P, so the transition term vanishes by construction.
+The full-atom residual stage recovers the fast modes discarded by TICA.
 """
 from __future__ import annotations
 
@@ -50,18 +64,24 @@ def kl_1d(p, q, bins):
 def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, epochs,
                        nstates, lag, stride, dt_ps, lat_bits, n_bits, seed, verbose,
                        entropy="gaussian", flow_kind="realnvp", predictive_kind="gru"):
-    """Shared post-CV core: flow density -> IGFS -> entropy code -> retained MSM ->
-    path bound -> full-atom residual -> Artifact. ``fetch_kept(global_indices)``
-    returns the aligned flat coords (n_keep, 3N) for the kept frames (in-RAM slice for
-    the batch path; a streamed read for the out-of-core path). ``cv_meta`` carries the
-    CV-method metadata (TICA params / VAMP score / cv tag) -- the reconstruction itself
-    is CV-AGNOSTIC (a fitted linear decoder), so this works for TICA or VAMPnet CVs."""
+    """Assemble a compression artifact from precomputed collective variables.
+
+    This shared post-collective-variable core executes the full pipeline: flow density
+    estimation, information-gain frame selection, entropy coding, retained-MSM
+    estimation, path-bound evaluation, full-atom residual coding, and artifact
+    construction. ``fetch_kept(global_indices)`` returns the aligned flattened
+    coordinates of shape (n_keep, 3N) for the kept frames; this is an in-memory slice
+    on the batch path and a streamed read on the out-of-core path. ``cv_meta`` carries
+    the collective-variable metadata (TICA parameters, VAMP score, and method tag). The
+    reconstruction is independent of the collective-variable method, relying on a fitted
+    linear decoder, and therefore applies equally to TICA and VAMPnet variables."""
     dt_strided_ns = stride * dt_ps / 1000.0
     CV_all = np.concatenate(CV_runs, axis=0).astype(np.float32)
     run_lengths = [c.shape[0] for c in CV_runs]
     T_total = CV_all.shape[0]
 
-    # --- stage 2: flow density on the CVs (RealNVP default; spline = T7) ---
+    # Flow density estimation on the collective variables. RealNVP is the default;
+    # the spline-coupling flow is selected by flow_kind == "spline".
     if flow_kind == "spline":
         from .spline_flow import SplineFlow
         flow = SplineFlow(cv_dim, hidden=64, n_layers=10, n_bins=8)
@@ -75,7 +95,8 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     with torch.no_grad():
         z_all = flow.forward(torch.as_tensor(CV_all))[0].numpy()
 
-    # --- stage 3: IGFS + lossless coding of kept latents vs N(0,I) ---
+    # Information-gain frame selection followed by lossless coding of the kept
+    # latents against the base density N(0, I).
     n_keep = max(2, int(keep_frac * T_total))
     kept = igfs_select(z_all, n_keep, seed=seed)
     L = 1 << lat_bits
@@ -90,7 +111,8 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         cv_rec = flow.inverse(torch.as_tensor(zrec, dtype=torch.float32)).numpy()
     cv_err = float(np.abs(cv_rec - CV_all[kept]).max())
 
-    # --- ensemble fidelity (flow vs data) + Pinsker on CV1 ---
+    # Ensemble fidelity of the flow against the data, with the Pinsker inequality
+    # applied to the leading collective variable.
     with torch.no_grad():
         samp = flow.sample(40000).numpy()
     lo, hi = np.percentile(CV_all[:, 0], [0.5, 99.5])
@@ -99,10 +121,12 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     mid = 0.5 * (lo + hi)
     obs = abs(float((CV_all[:, 0] > mid).mean()) - float((samp[:, 0] > mid).mean()))
 
-    # --- dynamics term: run-aware MSM on the CVs ---
-    # REPORTED kinetics (timescales + the path bound) use the reversible MLE (deeptime)
-    # when available, falling back to the (C+C^T)/2 estimator otherwise; `msm_estimator`
-    # records which. The full-size T_msm stored for convenience stays the pure-numpy one.
+    # Dynamics term: a run-aware MSM estimated on the collective variables.
+    # Reported kinetics, comprising the implied timescales and the path bound, use the
+    # reversible maximum-likelihood estimator from deeptime when it is available, and
+    # otherwise fall back to the symmetrized (C + C^T)/2 estimator; the field
+    # `msm_estimator` records which was used. The full-size T_msm retained for
+    # convenience remains the pure-numpy estimate.
     labels, centers = discretize(CV_runs, nstates, seed)
     C = count_matrix(labels, nstates, lag)
     T_msm, _ = transition_matrix(C, reversible=True)
@@ -110,12 +134,14 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     Tm_act, msm_estimator = estimate_reversible_T(C[np.ix_(act, act)])
     its = implied_timescales(Tm_act, lag, 5)
     its_ns = its * dt_strided_ns
-    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # GLIDE: Q==P
+    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # GLIDE: Q == P
 
-    # --- T4: full-atom residual stage (CV-AGNOSTIC linear decoder + dithered residual) ---
-    # A linear CV->coordinate decoder fit on the KEPT frames maps the decoded CV back to
-    # 3N; the residual recovers what that linear map misses. Works for ANY CVs (TICA or
-    # VAMPnet) and needs only the kept frames (streaming-friendly).
+    # Full-atom residual stage: a method-agnostic linear decoder combined with a
+    # dithered residual. A linear collective-variable-to-coordinate decoder, fit on the
+    # kept frames, maps the decoded collective variables back to 3N dimensions; the
+    # residual recovers the component the linear map omits. The construction applies to
+    # any collective variables (TICA or VAMPnet) and requires only the kept frames,
+    # which makes it compatible with streaming.
     labels_all = np.concatenate(labels)
     X_kept = np.asarray(fetch_kept(kept), dtype=np.float64)          # (n_keep, 3N) aligned
     xmean = X_kept.mean(axis=0)
@@ -138,10 +164,11 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     full_rec = X_approx_kept + rcodec.dequantize(rq, rstep) + state_mean_R[labels_kept]
     fullatom_rmsd = float(np.sqrt(((full_rec - X_kept) ** 2)
                                   .reshape(len(kept), -1, 3).sum(2).mean()))
-    # steric validity: does the reconstruction introduce atom overlaps the original did
-    # not have? Force-field-free geometry check -- the smallest inter-atomic distance per
-    # frame (the natural floor is the bonded distance); if the reconstruction's floor
-    # drops well below the original's, decode created clashes the path bound cannot see.
+    # Steric validity. This force-field-free geometry check tests whether the
+    # reconstruction introduces atomic overlaps absent from the original. The metric is
+    # the smallest inter-atomic distance per frame, whose natural floor is the bonded
+    # distance. A reconstruction floor well below the original floor indicates that
+    # decoding created clashes that the path bound does not detect.
     nat = D // 3
     orig_min = _min_interatomic(X_kept.reshape(len(kept), nat, 3), seed)
     rec_min = _min_interatomic(full_rec.reshape(len(kept), nat, 3), seed)
@@ -149,7 +176,8 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
               "rec_min_nm": float(np.percentile(rec_min, 1))}
     steric["ok"] = bool(steric["rec_min_nm"] >= 0.9 * steric["orig_min_nm"])
 
-    # --- T8: temporal learned-entropy model (rate WITH vs WITHOUT, over all frames) ---
+    # Temporal learned-entropy model. The coding rate is evaluated with and without the
+    # temporal prior over all frames.
     temporal_arch = temporal_state = None
     predictive_arch = predictive_state = None
     rate_gaussian_bpv = rate_temporal_bpv = None
@@ -166,9 +194,11 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         rate_temporal_bpv = temporal_rate_bits_per_value(z_all, tmodel, L, zmax)
         temporal_state = {k: v.detach().cpu() for k, v in tmodel.state_dict().items()}
     elif entropy == "predictive":
-        # T9: LOSSY learned predictive coding. Train the causal predictor (bound-as-loss
-        # conditional NLL), report the rate-distortion curve + the no-predictor floor.
-        # The TRUE rate-vs-observable-error gate (vs T8) runs on the trypsin set.
+        # Lossy learned predictive coding. The causal predictor is trained with the
+        # bound-as-loss conditional negative log-likelihood, and the rate-distortion
+        # curve is reported together with the no-predictor floor. The rate-versus-
+        # observable-error comparison against the temporal model is evaluated on the
+        # trypsin set.
         from .predictive_coder import (make_predictor, rate_distortion_curve,
                                        conditional_nll, static_gaussian_nll)
         from .temporal_prior import gaussian_rate_bits_per_value
@@ -234,8 +264,11 @@ def _tica_cvs(aligned, lag, cv_dim, x_mean, verbose):
 
 
 def _min_interatomic(X3, seed, n_sample=200):
-    """Per-frame minimum inter-atomic distance (nm) over a seeded sample of frames -- the
-    floor used by the steric-validity check. O(N^2) per frame, so it samples frames."""
+    """Compute the per-frame minimum inter-atomic distance over a sampled set of frames.
+
+    The distance is returned in nanometres and provides the floor used by the
+    steric-validity check. Because the per-frame computation is O(N^2), a seeded
+    random subset of frames is sampled rather than the full set."""
     X3 = np.asarray(X3, dtype=np.float64)
     n = len(X3)
     rng = np.random.default_rng(seed)
@@ -250,14 +283,18 @@ def _min_interatomic(X3, seed, n_sample=200):
 
 
 def _contact_cvs(coords_runs, lag, cv_dim, verbose, max_atoms=64, sep=2):
-    """Internal-coordinate (pairwise inter-atomic DISTANCE) featurization -> TICA. Inter-
-    atomic distances are invariant to overall translation and rotation, so this removes
-    the spurious rigid-body 'slow modes' that TICA on aligned Cartesian can fabricate --
-    the physically preferred kinetic featurization (Perez-Hernandez 2013; Scherer 2015).
-    Topology-free: uses a capped, evenly-spaced atom subset and a sequence-separation
-    filter, so it works without residue info (residue/contact-map featurization via the
-    topology is the ideal refinement). Reconstruction is unaffected -- the full-atom T4
-    residual decoder is fit on coordinates, not on the CV featurization."""
+    """Featurize trajectories by pairwise inter-atomic distances and apply TICA.
+
+    Inter-atomic distances are invariant to global translation and rotation, which
+    removes the spurious rigid-body slow modes that TICA on aligned Cartesian
+    coordinates can introduce. This internal-coordinate featurization is the physically
+    preferred choice for kinetics (Perez-Hernandez, J. Chem. Phys. 139, 015102, 2013;
+    Scherer, J. Chem. Theory Comput. 11, 5525, 2015). The featurization is
+    topology-free: it uses a capped, evenly spaced atom subset together with a
+    sequence-separation filter, so it operates without residue information. Residue or
+    contact-map featurization derived from the topology constitutes the ideal
+    refinement. Reconstruction is unaffected, since the full-atom residual decoder is
+    fit on coordinates rather than on the collective-variable featurization."""
     N = int(np.asarray(coords_runs[0]).shape[1])
     sub = np.unique(np.linspace(0, N - 1, min(int(max_atoms), N)).astype(int))
     pr = [(int(i), int(j)) for a, i in enumerate(sub) for j in sub[a + 1:]
@@ -295,11 +332,14 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", features="c
                         dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                         entropy="gaussian", flow_kind="realnvp",
                         predictive_kind="gru") -> Tuple[Artifact, dict]:
-    """In-RAM, run-aware flow-based GLIDE on a list of (T_i, N, 3) arrays (nm). ``cv`` is
-    the collective-variable method: 'tica' (linear, default) or 'vampnet' (T6).
-    ``features`` is the TICA featurization: 'cartesian' (aligned coords, default) or
-    'contacts' (rotation/translation-invariant inter-atomic distances -- removes spurious
-    rigid-body slow modes; physically preferred for kinetics). Ignored when cv='vampnet'."""
+    """Run in-memory, run-aware flow-based GLIDE on a list of coordinate arrays.
+
+    Each input array has shape (T_i, N, 3) in nanometres. ``cv`` selects the
+    collective-variable method: 'tica' (linear, the default) or 'vampnet'. ``features``
+    selects the TICA featurization: 'cartesian' (aligned coordinates, the default) or
+    'contacts' (rotation- and translation-invariant inter-atomic distances, which remove
+    spurious rigid-body slow modes and are physically preferred for kinetics). The
+    ``features`` argument is ignored when cv='vampnet'."""
     ref = None
     aligned = []
     for r in coords_runs:
@@ -326,20 +366,24 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
                        dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                        entropy="gaussian", flow_kind="realnvp",
                        predictive_kind="gru") -> Tuple[Artifact, dict]:
-    """T5: out-of-core GLIDE. ``chunk_factory()`` returns a FRESH iterator of (T_c, N, 3)
-    coordinate chunks (e.g. from md.iterload). The trajectory is treated as ONE
-    continuous run; the whole thing is never held in RAM -- only the small CVs and the
-    sparse kept frames. Streaming TICA accumulates the same covariances as the batch
-    path, so the TICA, the (seeded) discretization, the retained MSM, and the kinetics
-    are IDENTICAL to compress_trajectory. (The flow/IGFS exemplar selection may differ
-    run-to-run -- torch CPU multi-threading is non-deterministic in the flow training --
-    but the kinetics, ensemble, and bound are unaffected.)"""
-    # reference = first frame of the first chunk (centered) -- same as the batch path
+    """Run out-of-core flow-based GLIDE over a stream of coordinate chunks.
+
+    ``chunk_factory()`` returns a fresh iterator of coordinate chunks of shape
+    (T_c, N, 3), for example from ``md.iterload``. The trajectory is treated as a single
+    continuous run and is never held in memory in full; only the low-dimensional
+    collective variables and the sparse kept frames are retained. Streaming TICA
+    accumulates the same covariances as the batch path, so the TICA model, the seeded
+    discretization, the retained MSM, and the kinetics are identical to those produced
+    by ``compress_trajectory``. The flow and frame-selection exemplars may vary between
+    runs because CPU multi-threading renders flow training non-deterministic, but the
+    kinetics, the ensemble, and the bound are unaffected."""
+    # The reference is the centred first frame of the first chunk, matching the batch
+    # path.
     first_chunk = next(iter(chunk_factory()))
     ref = np.asarray(first_chunk[0], dtype=np.float64)
     ref = ref - ref.mean(axis=0, keepdims=True)
 
-    # PASS 1: streaming TICA (chunked partial_fit)
+    # Pass 1: streaming TICA via chunked partial_fit.
     if verbose:
         print("  [pass 1] streaming TICA partial_fit ...")
     tica = TICA(lag=lag, n_components=cv_dim)
@@ -351,7 +395,8 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
         print("  TICA CVs              : %d-D   leading timescales (frames): %s"
               % (cv_dim, np.round(tica.timescales_[:cv_dim], 1)))
 
-    # PASS 2: transform -> CVs (small; collected in RAM)
+    # Pass 2: transform to collective variables, which are small and collected in
+    # memory.
     if verbose:
         print("  [pass 2] transform -> CVs ...")
     CV_chunks = []
@@ -360,7 +405,8 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
         CV_chunks.append(tica.transform(a.reshape(a.shape[0], -1)))
     CV_all = np.concatenate(CV_chunks, axis=0)
 
-    # PASS 3 (lazy): fetch ONLY the kept frames' aligned coords for the residual
+    # Pass 3, evaluated lazily: fetch only the aligned coordinates of the kept frames
+    # for the residual stage.
     def fetch_kept(kept_idx):
         kept_idx = np.asarray(kept_idx, dtype=np.int64)
         kmap = {int(g): i for i, g in enumerate(kept_idx)}
@@ -395,10 +441,13 @@ def run_glide(top: str, dcd: str, *, stride=10, cv="tica", features="cartesian",
             n_bits=4, seed=0, streaming=False, chunk=2000, entropy="gaussian",
             flow_kind="realnvp", predictive_kind="gru",
             verbose=True) -> Tuple[Artifact, dict]:
-    """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based GLIDE.
-    ``cv`` = 'tica' (default) or 'vampnet' (T6). ``features`` = 'cartesian' (default) or
-    'contacts' (invariant internal coordinates -- physically preferred for kinetics).
-    ``streaming=True`` uses the out-of-core path (chunked md.iterload; cartesian TICA)."""
+    """Load a DCD trajectory and run flow-based GLIDE.
+
+    The trajectory comprises the heavy atoms of a solvent-stripped system. ``cv`` is
+    'tica' (the default) or 'vampnet'. ``features`` is 'cartesian' (the default) or
+    'contacts', the latter using invariant internal coordinates that are physically
+    preferred for kinetics. Setting ``streaming=True`` selects the out-of-core path,
+    which uses chunked ``md.iterload`` with Cartesian TICA."""
     import mdtraj as md
     if streaming and cv == "vampnet":
         raise SystemExit("--cv vampnet is not supported with --streaming (the VAMPNet "
@@ -421,7 +470,7 @@ def run_glide(top: str, dcd: str, *, stride=10, cv="tica", features="cartesian",
               seed=seed, verbose=verbose, entropy=entropy, flow_kind=flow_kind,
               predictive_kind=predictive_kind)
     if not streaming:
-        kw["features"] = features            # contacts featurization is in-RAM only
+        kw["features"] = features            # contact featurization is in-memory only
     if streaming:
         def factory():
             return (np.asarray(ch.xyz, dtype=np.float64) for ch in

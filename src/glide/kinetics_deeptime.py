@@ -1,35 +1,45 @@
 """
-kinetics_deeptime.py
-====================
-Production MSM kinetics via deeptime (deeptime-ml/deeptime), to replace the
-crude symmetrized estimator in kinetic_codec for the numbers that go in the
-paper. The hand-rolled estimator in kinetic_codec.transition_matrix uses
-(C+C^T)/2; that is fine as a coder/illustration but not what you publish.
+Markov State Model Kinetics via deeptime
+========================================
+Background
+----------
+This module provides the reference Markov state model (MSM) kinetics estimators
+used to report timescales and rate observables. The reversible maximum-likelihood
+MSM and BayesianMSM are obtained from deeptime (Hoffmann et al., J. Chem. Phys.
+2021), in place of the symmetrized (C + C^T)/2 estimator in kinetic_codec. The
+symmetrized estimator is adequate as a coder illustration but is not a
+detailed-balance maximum-likelihood estimator and is therefore not used for
+reported kinetic quantities.
 
-What deeptime buys you (the reason the recon said "reuse, don't hand-roll"):
-  - reversible MAXIMUM-LIKELIHOOD MSM (proper estimator);
-  - implied-timescale convergence (lag scan) to choose the lag honestly;
-  - BayesianMSM for sampled uncertainties / error bars on timescales;
-  - streaming TICA/VAMP (online covariance via partial_fit) so the CV step
-    scales past what fits in RAM -- directly relevant to the 419k -> 1M frame
-    trajectory;
-  - VAMPnets later, if you want nonlinear slow CVs (not wrapped here).
+Capabilities
+------------
+The deeptime backend supplies a reversible maximum-likelihood MSM, an
+implied-timescale convergence diagnostic via a lag scan, a BayesianMSM for
+sampled uncertainties on timescales, and a streaming TICA estimator whose
+covariance is accumulated through partial_fit so the collective-variable step
+scales beyond available memory. VAMPnets for nonlinear slow collective variables
+are available in deeptime but are not wrapped here.
 
-Run-aware by construction: every function takes a LIST of trajectories (one per
-run); deeptime tallies transitions within each, never across seams -- the same
-discipline as kinetic_codec.count_matrix.
+Run handling
+------------
+Every estimator accepts a list of trajectories, one per run; deeptime tallies
+transitions within each trajectory and never across run boundaries, matching the
+convention in kinetic_codec.count_matrix.
 
-VERIFIED against deeptime 0.4.5 (signatures introspected and pipeline tested):
+Implementation notes
+--------------------
+The pipeline was verified against deeptime 0.4.5 with the following call
+sequence:
     TransitionCountEstimator(lagtime, count_mode).fit_fetch(dtrajs).submodel_largest()
     MaximumLikelihoodMSM(reversible=True).fit_fetch(count_model)        -> msm
     BayesianMSM(reversible=True, n_samples=N).fit_fetch(count_model)    -> posterior.samples
     KMeans(n_clusters, fixed_seed=seed).fit_fetch(X); model.transform(X)
     TICA(lagtime, dim).partial_fit(run); model = est.fetch_model(); model.transform(run)
     msm.timescales(k=...), msm.transition_matrix, msm.stationary_distribution
-If you upgrade deeptime, re-check these -- the API has shifted across releases.
-
-Import-guarded: if deeptime is absent, calling any function raises a clear
-ImportError with install instructions, so importing the package never breaks.
+These signatures have shifted across deeptime releases and should be re-checked
+after an upgrade. Imports are guarded: if deeptime is absent, calling any
+function raises an ImportError with installation instructions, so importing the
+package remains safe.
 """
 
 from __future__ import annotations
@@ -48,11 +58,19 @@ except Exception as _e:                              # pragma: no cover
 
 
 def reversible_mle_from_counts(C, reversible=True):
-    """Reversible MAXIMUM-LIKELIHOOD transition matrix from a COUNT matrix, restricted to
-    its largest connected set. Returns (T_active, active_state_indices). This is the
-    PUBLISHABLE estimator -- a proper detailed-balance MLE (deeptime), not the crude
-    (C+C^T)/2 symmetrization. Used by `kinetic_codec.estimate_reversible_T` to back the
-    reported timescales / path bound when deeptime is available."""
+    """Estimate a reversible maximum-likelihood transition matrix from a count matrix.
+
+    The estimate is restricted to the largest connected set of the count matrix.
+    This is the detailed-balance maximum-likelihood estimator (deeptime), rather
+    than the (C + C^T)/2 symmetrization, and backs the reported timescales and
+    path bound via kinetic_codec.estimate_reversible_T when deeptime is available.
+
+    Returns
+    -------
+    tuple
+        (T_active, active_state_indices): the transition matrix on the active set
+        and the indices of those states in the original state space.
+    """
     _require()
     import numpy as _np
     tcm = TransitionCountModel(_np.asarray(C, dtype=_np.float64)).submodel_largest()
@@ -68,10 +86,18 @@ def _require():
 
 
 def tica_cvs(runs_feat, lag, dim):
-    """Streaming TICA on a list of per-run feature arrays (e.g. aligned heavy
-    coords reshaped to (T,3N), or contact features). Uses partial_fit so the
-    covariance is accumulated run-by-run without holding everything in RAM.
-    Returns (model, list_of_CV_trajectories)."""
+    """Fit streaming TICA on a list of per-run feature arrays.
+
+    Features may be aligned heavy-atom coordinates reshaped to (T, 3N) or contact
+    features. The covariance is accumulated run-by-run through partial_fit so the
+    full dataset need not reside in memory.
+
+    Returns
+    -------
+    tuple
+        (model, list_of_CV_trajectories): the fitted TICA model and the
+        transformed collective-variable trajectory for each run.
+    """
     _require()
     est = TICA(lagtime=int(lag), dim=int(dim))
     for r in runs_feat:
@@ -82,7 +108,14 @@ def tica_cvs(runs_feat, lag, dim):
 
 
 def cluster(cv_runs, n_states, seed=0):
-    """k-means microstates on the pooled CVs. Returns (dtrajs list, model)."""
+    """Discretize the pooled collective variables into k-means microstates.
+
+    Returns
+    -------
+    tuple
+        (dtrajs, model): the per-run discrete trajectories and the fitted
+        k-means model.
+    """
     _require()
     X = np.concatenate([np.asarray(c, dtype=np.float64) for c in cv_runs], axis=0)
     model = KMeans(n_clusters=int(n_states), fixed_seed=int(seed),
@@ -93,9 +126,12 @@ def cluster(cv_runs, n_states, seed=0):
 
 
 def mlmsm(dtrajs, lag, reversible=True, count_mode="sliding"):
-    """Reversible maximum-likelihood MSM on a list of discrete trajectories,
-    restricted to the largest connected set. Returns the deeptime MSM model
-    (use .timescales(k), .transition_matrix, .stationary_distribution)."""
+    """Estimate a reversible maximum-likelihood MSM from discrete trajectories.
+
+    The estimate is restricted to the largest connected set. The returned
+    deeptime MSM model exposes .timescales(k), .transition_matrix, and
+    .stationary_distribution.
+    """
     _require()
     counts = TransitionCountEstimator(lagtime=int(lag),
                                       count_mode=count_mode).fit_fetch(dtrajs)
@@ -104,18 +140,26 @@ def mlmsm(dtrajs, lag, reversible=True, count_mode="sliding"):
 
 
 def implied_timescales(dtrajs, lag, k=5, reversible=True):
-    """Convenience: the k slowest implied timescales (in frames) at one lag."""
+    """Return the k slowest implied timescales (in frames) at a single lag."""
     return mlmsm(dtrajs, lag, reversible).timescales(k=k)
 
 
 def its_lag_scan(dtrajs, lags, k=5, reversible=True):
-    """Implied timescales vs lag -- the convergence check that justifies a lag
-    choice. Returns array (len(lags), k) in frames. Timescales should plateau
-    once the lag exceeds the discretization error; pick the lag where they do.
+    """Compute implied timescales across a range of lag times.
 
-    Robust to the reversible-MLE NOT CONVERGING (which happens on real data when the
-    discretization is too fine / poorly connected at a given lag): the failing lag's
-    row is filled with NaN rather than raising, so the rest of the scan still reports."""
+    This is the convergence diagnostic that justifies a lag choice: the implied
+    timescales plateau once the lag exceeds the discretization error, and the lag
+    is selected at the onset of that plateau. Lags at which the reversible
+    maximum-likelihood estimate fails to converge (which can occur on real data
+    when the discretization is too fine or poorly connected at a given lag) yield
+    a row of NaN rather than an exception, so the remaining lags are still
+    reported.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of shape (len(lags), k) of implied timescales in frames.
+    """
     _require()
     out = []
     for lag in lags:
@@ -127,9 +171,16 @@ def its_lag_scan(dtrajs, lags, k=5, reversible=True):
 
 
 def bayes_timescales(dtrajs, lag, k=5, n_samples=100, reversible=True):
-    """Implied timescales with Bayesian (sampled) uncertainties. Uses the
-    'effective' count mode (deeptime's recommendation for statistical error).
-    Returns (mean[k], std[k]) in frames -- your kinetic error bars."""
+    """Compute implied timescales with Bayesian (sampled) uncertainties.
+
+    The 'effective' count mode is used, following the deeptime recommendation for
+    statistical-error estimation.
+
+    Returns
+    -------
+    tuple
+        (mean[k], std[k]) in frames, providing the kinetic uncertainty estimates.
+    """
     _require()
     counts = TransitionCountEstimator(lagtime=int(lag),
                                       count_mode="effective").fit_fetch(dtrajs)
@@ -142,18 +193,24 @@ def bayes_timescales(dtrajs, lag, k=5, n_samples=100, reversible=True):
 
 def kinetic_resolution(dtrajs, lag, dt_ns, k=5, n_samples=100,
                        rel_err_max=0.25, min_events=10, reversible=True):
-    """Honest kinetic-RESOLUTION report -- which dynamical processes this trajectory
-    can actually validate. For each implied-timescale process it returns the Bayesian
-    timescale, its 95% confidence interval, the relative uncertainty, and the number of
-    INDEPENDENT events the trajectory contains for it (~ T_total / t_i, the number of
-    round trips). A process is flagged `resolved` only if its Bayesian relative error is
-    below `rel_err_max` AND it has at least `min_events` independent events: you cannot
-    claim to preserve a kinetic observable the SOURCE trajectory never sampled, no matter
-    how good the compressor. `dt_ns` converts (strided) frames to nanoseconds. Returns a
-    list of dicts, slowest process first.
+    """Report which dynamical processes the trajectory can statistically resolve.
 
-    This is the discipline the MD-compression literature usually skips: report the
-    statistical resolution of the reference before comparing methods on it."""
+    For each implied-timescale process the report gives the Bayesian timescale,
+    its 95% confidence interval, the relative uncertainty, and the number of
+    independent events the trajectory contains for that process (approximately
+    T_total / t_i, the number of round trips). A process is flagged ``resolved``
+    only when its Bayesian relative error is below ``rel_err_max`` and it has at
+    least ``min_events`` independent events; a compressor cannot be claimed to
+    preserve a kinetic observable that the source trajectory itself never sampled.
+    The argument ``dt_ns`` converts (strided) frames to nanoseconds. Reporting the
+    statistical resolution of the reference before comparing methods on it is a
+    discipline frequently omitted in the MD-compression literature.
+
+    Returns
+    -------
+    list of dict
+        One entry per process, ordered slowest first.
+    """
     _require()
     mean, std = bayes_timescales(dtrajs, lag, k=k, n_samples=int(n_samples),
                                  reversible=reversible)
@@ -177,7 +234,7 @@ def kinetic_resolution(dtrajs, lag, dt_ns, k=5, n_samples=100,
 
 
 def format_resolution(report, total_us=None):
-    """Pretty-print a kinetic_resolution() report as a table (returned as a string)."""
+    """Format a kinetic_resolution() report as a table, returned as a string."""
     lines = []
     if total_us is not None:
         lines.append("trajectory length: %.1f us" % total_us)
@@ -199,12 +256,20 @@ def format_resolution(report, total_us=None):
 
 
 def metastable_mfpt(dtrajs, lag, dt_ns, n_meta=2, count_mode="sliding", reversible=True):
-    """PCCA+ metastable coarse-graining + mean first-passage times between the metastable
-    sets -- the RATE observables (k_on/k_off ~ 1/MFPT) the path bound is meant to cover,
-    now actually COMPUTED from the reversible-MLE MSM rather than only bounded. Returns a
-    dict: metastable populations, the MFPT matrix in ns between sets (frames * dt_ns), and
-    the leading implied timescales in ns. This turns the abstract transition-term guarantee
-    into the rate language the field cites (deeptime mfpt is in trajectory-step units)."""
+    """Compute PCCA+ metastable sets and inter-set mean first-passage times.
+
+    The mean first-passage times yield the rate observables (k_on, k_off
+    approximately 1/MFPT) addressed by the path bound, computed directly from the
+    reversible maximum-likelihood MSM rather than only bounded. This expresses the
+    transition-term guarantee in the rate language used in the field. The deeptime
+    MFPT is in trajectory-step units and is converted to nanoseconds via ``dt_ns``.
+
+    Returns
+    -------
+    dict
+        Metastable populations, the inter-set MFPT matrix in nanoseconds, and the
+        leading implied timescales in nanoseconds.
+    """
     _require()
     counts = TransitionCountEstimator(lagtime=int(lag),
                                       count_mode=count_mode).fit_fetch(dtrajs)
@@ -227,7 +292,7 @@ def metastable_mfpt(dtrajs, lag, dt_ns, n_meta=2, count_mode="sliding", reversib
 
 
 def format_mfpt(report):
-    """Pretty-print a metastable_mfpt() report (returned as a string)."""
+    """Format a metastable_mfpt() report as a table, returned as a string."""
     n = report["n_meta"]
     lines = ["PCCA+ metastable kinetics  (%d metastable sets, reversible-MLE MSM)" % n,
              "  metastable populations : %s"
@@ -247,23 +312,26 @@ def format_mfpt(report):
 
 
 def msm_for_pathbound(dtrajs, lag, reversible=True):
-    """Return (transition_matrix, active_state_indices) for handing to
-    glide_pathbound.report_kinetic_fidelity. To compare two compressors fairly,
-    discretize BOTH against the SAME k-means centers, then estimate each MSM
-    here, then map both transition matrices onto a common active-state index
-    set before calling the path bound (see baselines.py / INSTRUCTIONS)."""
+    """Return (transition_matrix, active_state_indices) for the path bound.
+
+    The result is intended for glide_pathbound.report_kinetic_fidelity. A fair
+    comparison of two compressors requires discretizing both against the same
+    k-means centers, estimating each MSM here, and mapping both transition
+    matrices onto a common active-state index set before calling the path bound
+    (see baselines.py and the project instructions).
+    """
     _require()
     counts = TransitionCountEstimator(lagtime=int(lag),
                                       count_mode="sliding").fit_fetch(dtrajs)
     counts = counts.submodel_largest()
     msm = MaximumLikelihoodMSM(reversible=reversible).fit_fetch(counts)
-    # deeptime keeps the mapping from full state ids to the active submodel:
+    # deeptime retains the mapping from full state ids to the active submodel.
     active = np.asarray(counts.state_symbols, dtype=np.int64)
     return msm.transition_matrix, active
 
 
 if __name__ == "__main__":
-    # Smoke test: two synthetic 2-state runs -> the pipeline runs end to end.
+    # Smoke test: two synthetic two-state runs exercise the pipeline end to end.
     if not _HAVE_DEEPTIME:
         print("deeptime not installed; `pip install deeptime` to use this module.")
         raise SystemExit(0)

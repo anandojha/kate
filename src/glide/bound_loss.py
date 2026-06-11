@@ -1,30 +1,39 @@
 """
-bound_loss.py
-=============
-T10 -- the kinetic (path-distribution) bound made DIFFERENTIABLE, so it can be used as
-a TRAINING LOSS, not just an after-the-fact scorer. This is the one place where the ML
-and the novel idea become the same thing: a neural compressor trained to preserve
-KINETIC observables (the transition term of the path bound), not coordinate MSE.
+Differentiable Kinetic Path-Bound Loss
+======================================
 
-The machinery: a VAMPnet-style SOFT state assignment chi(x) in the probability simplex
-makes the microstate populations -- and therefore the transition matrix -- a smooth,
-differentiable function of the network (Mardt & Noe 2018; Wu & Noe 2020). From soft
-assignments at time t and t+tau:
+Background
+----------
+This module makes the kinetic path-distribution bound differentiable, so that it may
+serve as a training loss rather than only as a post hoc scorer. It enables a neural
+compressor to be trained to preserve kinetic observables, specifically the transition
+term of the path bound, in place of coordinate mean-squared error.
+
+A VAMPnet-style soft state assignment chi(x) in the probability simplex renders the
+microstate populations, and therefore the transition matrix, a smooth, differentiable
+function of the network (VAMPnets: Mardt et al., Nat. Commun. 9, 5 (2018); deep
+generalized MSMs: Wu and Noe, J. Nonlinear Sci. 30, 23 (2020)). From soft assignments
+at times t and t + tau,
 
     C00 = <chi_t chi_t^T>,  C01 = <chi_t chi_{t+tau}^T>,  C11 = <chi_{t+tau} chi_{t+tau}^T>
-    T   = C00^{-1} C01      (the soft transition matrix, row-normalized)
-    VAMP2 = || C00^{-1/2} C01 C11^{-1/2} ||_F^2   (the slow-dynamics score to pretrain chi)
+    T     = C00^{-1} C01                              (row-normalized soft transition matrix)
+    VAMP2 = || C00^{-1/2} C01 C11^{-1/2} ||_F^2       (slow-dynamics score for pretraining chi)
 
 The path-bound transition term between a reference dynamics P and a compressed dynamics
-Q, h(P||Q) = sum_i pi_i sum_j P_ij log(P_ij/Q_ij), is then differentiable end-to-end --
-so `loss = rate + lambda * h(P||Q)` trains a compressor to spend bits where they matter
-for KINETICS. Everything here is pure torch (autograd); deeptime is not needed.
+Q, h(P||Q) = sum_i pi_i sum_j P_ij log(P_ij / Q_ij), is then differentiable end-to-end,
+so that loss = rate + lambda * h(P||Q) trains a compressor to allocate bits where they
+affect the kinetics. All computation here uses pure torch autograd; deeptime is not
+required.
 
-Honest scope: this is the differentiable SURROGATE of the bound (soft states + a
-regression transition matrix), used as a loss. The reported, certified kinetics still
-come from the deeptime reversible-MLE MSM + the path bound on hard states (glide.pathbound
-/ glide.analyze). Whether training on the bound actually beats training on MSE is an
-EMPIRICAL question -- measured, not assumed (see examples / the T10 experiment).
+Scope
+-----
+The quantity defined here is a differentiable surrogate of the bound, combining soft
+states with a regression transition matrix, used as a loss. The reported, certified
+kinetics are obtained separately from the deeptime reversible-maximum-likelihood MSM
+together with the path bound evaluated on hard states (glide.pathbound, glide.analyze).
+Whether training on the bound improves upon training on mean-squared error is an
+empirical question, measured rather than assumed (see the examples and the T10
+experiment).
 """
 from __future__ import annotations
 
@@ -52,8 +61,12 @@ def _inv_sqrt(C, eps=1e-6):
 
 
 def vamp2_score(chi0, chi1, eps=1e-6):
-    """VAMP-2 score of a soft assignment (higher = captures more slow dynamics). Used to
-    PRETRAIN the soft-state encoder so the readout is kinetically meaningful."""
+    """Compute the VAMP-2 score of a soft assignment.
+
+    A higher score indicates that more of the slow dynamics is captured. The score is
+    used to pretrain the soft-state encoder so that its readout is kinetically
+    meaningful (VAMPnets: Mardt et al., Nat. Commun. 9, 5 (2018)).
+    """
     c00, c01, c11 = soft_covariances(chi0, chi1)
     n = c00.shape[0]
     eye = torch.eye(n, dtype=c00.dtype, device=c00.device)
@@ -62,8 +75,11 @@ def vamp2_score(chi0, chi1, eps=1e-6):
 
 
 def soft_transition_matrix(chi0, chi1, eps=1e-6):
-    """Differentiable soft MSM T = C00^{-1} C01, clamped + row-normalized to a proper
-    row-stochastic transition matrix."""
+    """Compute the differentiable soft MSM transition matrix T = C00^{-1} C01.
+
+    The result is clamped and row-normalized to yield a proper row-stochastic
+    transition matrix.
+    """
     c00, c01, _ = soft_covariances(chi0, chi1)
     n = c00.shape[0]
     eye = torch.eye(n, dtype=c00.dtype, device=c00.device)
@@ -73,7 +89,7 @@ def soft_transition_matrix(chi0, chi1, eps=1e-6):
 
 
 def stationary(T, n_iter=100):
-    """Stationary distribution by power iteration on T (differentiable)."""
+    """Compute the stationary distribution of T by differentiable power iteration."""
     n = T.shape[0]
     pi = torch.full((n,), 1.0 / n, dtype=T.dtype, device=T.device)
     for _ in range(n_iter):
@@ -83,11 +99,14 @@ def stationary(T, n_iter=100):
 
 
 def transition_term(P, Q, pi=None, eps=1e-8):
-    """The path-bound TRANSITION term h(P||Q) = sum_i pi_i sum_j P_ij log(P_ij/Q_ij), in
-    nats/step -- the differentiable KINETIC distortion. P, Q are row-stochastic; pi
-    defaults to P's stationary distribution."""
+    """Compute the path-bound transition term h(P||Q).
+
+    The term is h(P||Q) = sum_i pi_i sum_j P_ij log(P_ij / Q_ij), expressed in nats per
+    step, and constitutes the differentiable kinetic distortion. P and Q are
+    row-stochastic; pi defaults to the stationary distribution of P.
+    """
     if pi is None:
-        pi = stationary(P).detach()         # weight by P's populations (stop-grad)
+        pi = stationary(P).detach()         # weight by the populations of P (stop-gradient)
     Pc = torch.clamp(P, eps, 1.0)
     Qc = torch.clamp(Q, eps, 1.0)
     row = (Pc * torch.log(Pc / Qc)).sum(dim=1)
@@ -95,17 +114,25 @@ def transition_term(P, Q, pi=None, eps=1e-8):
 
 
 def kinetic_distortion(chi_ref, chi_cmp, lag):
-    """Differentiable kinetic distortion between a REFERENCE soft trajectory chi_ref and
-    a COMPRESSED one chi_cmp (same soft-state encoder, applied to original vs compressed
-    inputs): the transition term between their soft MSMs at `lag`."""
+    """Compute the differentiable kinetic distortion between two soft trajectories.
+
+    The reference soft trajectory chi_ref and the compressed soft trajectory chi_cmp are
+    produced by the same soft-state encoder applied to the original and compressed inputs
+    respectively. The distortion is the transition term between their soft MSMs at the
+    given lag.
+    """
     P = soft_transition_matrix(*_lagged(chi_ref, lag))
     Q = soft_transition_matrix(*_lagged(chi_cmp, lag))
     return transition_term(P, Q)
 
 
 class SoftStateEncoder(nn.Module):
-    """A small MLP -> softmax over n_states: a VAMPnet lobe that outputs a SOFT state
-    assignment (a probability vector per frame). Pretrain by maximizing vamp2_score."""
+    """Soft-state encoder: a small MLP with a softmax over n_states.
+
+    The module is a VAMPnet lobe that outputs a soft state assignment, namely a
+    probability vector per frame (VAMPnets: Mardt et al., Nat. Commun. 9, 5 (2018)). It
+    is pretrained by maximizing the VAMP-2 score.
+    """
 
     def __init__(self, in_dim, n_states, hidden=32, n_layers=2):
         super().__init__()
@@ -120,7 +147,7 @@ class SoftStateEncoder(nn.Module):
         return torch.softmax(self.net(x), dim=-1)
 
     def fit_vamp(self, Y, lag, epochs=200, lr=1e-3, seed=0, verbose=False):
-        """Pretrain to maximize the VAMP-2 score (capture the slow dynamics)."""
+        """Pretrain the encoder by maximizing the VAMP-2 score to capture the slow dynamics."""
         torch.manual_seed(seed)
         Y = torch.as_tensor(Y, dtype=torch.float32)
         opt = torch.optim.Adam(self.parameters(), lr=lr)

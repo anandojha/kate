@@ -1,28 +1,41 @@
 """
-benchmark.py
-============
-The T3 contrast -- the paper's central figure. ONE pipeline:
+Kinetic-Fidelity Benchmark (T3 Contrast)
+========================================
+Background
+----------
+This module implements the T3 contrast, the central benchmark figure. The
+pipeline proceeds as follows:
 
   load trajectory
-    -> {GLIDE, baselines}  reconstruct  (GLIDE RETAINS its MSM; baselines reconstruct coords)
-    -> featurize with a COMMON TICA and discretize against COMMON k-means centers
-    -> reversible MSM per method on the SAME active-state support  (matched indexing)
-    -> glide_pathbound score vs the ORIGINAL MSM  (ensemble term + transition term)
-    -> table + plot (implied timescales / transition-term per method).
+    -> reconstruct with {GLIDE, baselines} (GLIDE retains its MSM; the baselines
+       reconstruct coordinates)
+    -> featurize with a common TICA and discretize against common k-means centers
+    -> estimate a reversible MSM per method on the same active-state support
+       (matched indexing)
+    -> score with glide_pathbound against the original MSM (ensemble term and
+       transition term)
+    -> tabulate and plot the implied timescales and transition term per method.
 
-Why matched support, not deeptime's per-method largest-connected-set: the path bound
-compares P and Q ENTRYWISE, so every method's transition matrix must live on the SAME
-state indexing. We therefore fix ONE active set (largest connected set of the
-reference counts) and estimate every method's reversible MSM (`estimate_reversible_T`)
-on exactly those states -- the reversible MLE (deeptime) when installed, else the
-pure-numpy (C+C^T)/2 fallback, so the contrast still runs with no extra deps. This is
-the fair-comparison discipline RECIPE T3 asks for (same features, same centers, same
-lag) carried through to the estimator.
+Matched support
+---------------
+A matched active set is used rather than deeptime's per-method largest connected
+set because the path bound compares P and Q entrywise, so every method's
+transition matrix must share the same state indexing. One active set is fixed
+(the largest connected set of the reference counts), and every method's
+reversible MSM is estimated on exactly those states via
+``estimate_reversible_T``, using the reversible maximum-likelihood estimator
+(deeptime) when installed and the pure-numpy (C + C^T)/2 fallback otherwise, so
+the contrast runs without additional dependencies. This carries the
+fair-comparison discipline of recipe T3 (same features, same centers, same lag)
+through to the estimator.
 
-Expected result (the claim): ensemble-only / coordinate-bounded methods show a large
-TRANSITION term (their implied timescales drift); GLIDE's is ~0 because it retains the
-MSM. The ensemble term is small for all -- which is exactly why the static bound would
-WRONGLY certify the others as faithful.
+Expected result
+---------------
+Ensemble-only and coordinate-bounded methods exhibit a large transition term
+(their implied timescales drift), whereas the GLIDE transition term is
+approximately zero because it retains the MSM. The ensemble term is small for all
+methods, which is precisely why a static, ensemble-only bound would incorrectly
+certify the other methods as faithful.
 """
 from __future__ import annotations
 
@@ -36,8 +49,10 @@ from . import baselines
 
 
 def _assign(CV, centers):
-    """Nearest-center microstate assignment (project a reconstruction onto the COMMON
-    discretization)."""
+    """Assign each frame to its nearest microstate center.
+
+    This projects a reconstruction onto the common discretization.
+    """
     from scipy.spatial import cKDTree
     return cKDTree(np.asarray(centers)).query(np.asarray(CV))[1].astype(np.int64)
 
@@ -45,9 +60,16 @@ def _assign(CV, centers):
 def run_benchmark(coords_runs, methods=("glide", "shuffle", "quantize"), *, lag=10,
                   nstates=50, cv_dim=2, dt_strided_ns=0.1, out=None, seed=0,
                   verbose=True):
-    """Score each method's kinetic fidelity against the original MSM. Returns a list
-    of per-method result dicts; writes a contrast plot to ``out`` if given."""
-    # --- reference featurization on the ORIGINAL trajectory ---
+    """Score each method's kinetic fidelity against the original MSM.
+
+    A contrast plot is written to ``out`` when that argument is provided.
+
+    Returns
+    -------
+    list of dict
+        One result entry per method.
+    """
+    # Reference featurization on the original trajectory.
     ref = None
     aligned = []
     for r in coords_runs:
@@ -57,7 +79,7 @@ def run_benchmark(coords_runs, methods=("glide", "shuffle", "quantize"), *, lag=
     tica = TICA(lag=lag, n_components=cv_dim).fit(aligned)
     CV_ref = [tica.transform(a) for a in aligned]
 
-    # --- COMMON discretization (centers fit once, on the original) ---
+    # Common discretization; centers are fit once on the original trajectory.
     _, centers = discretize(CV_ref, nstates, seed)
     ref_labels = [_assign(c, centers) for c in CV_ref]
     C_ref = count_matrix(ref_labels, nstates, lag)
@@ -69,7 +91,7 @@ def run_benchmark(coords_runs, methods=("glide", "shuffle", "quantize"), *, lag=
     for m in methods:
         m = m.lower()
         if m == "glide":
-            # GLIDE RETAINS the MSM -> its kinetics ARE the reference dynamics.
+            # GLIDE retains the MSM, so its kinetics are the reference dynamics.
             Q = P
             note = "retained MSM (kinetics not re-estimated)"
             available = True

@@ -1,5 +1,9 @@
 """
-cli.py -- the single ``glide`` entry point.
+Command-Line Interface
+======================
+Background
+----------
+This module provides the single ``glide`` entry point and its subcommands:
 
   glide compress   TOP DCD -o ART      align -> CV/flow -> IGFS -> entropy code + MSM
   glide decompress ART -o OUT          flow inverse for kept frames (+T4 full-atom)
@@ -7,9 +11,10 @@ cli.py -- the single ``glide`` entry point.
   glide bound      ART REF             ensemble term, transition term, Pinsker pair/path
   glide benchmark  TOP DCD             GLIDE vs MDZip/SZ3/ZFP, scored by the path bound      [T3]
 
-Imports are LAZY PER SUBCOMMAND: the module top level imports only argparse, and each
-handler imports only what it needs. So ``glide bound`` (pure numpy) never imports torch
-or deeptime -- the kinetic guarantee runs on a box without either.
+Imports are deferred per subcommand. The module top level imports only argparse,
+and each handler imports only the components it requires. Consequently
+``glide bound`` (pure numpy) imports neither torch nor deeptime, so the kinetic
+guarantee can be evaluated on a host without either dependency installed.
 """
 from __future__ import annotations
 
@@ -26,8 +31,11 @@ def _is_artifact_dir(path: str) -> bool:
 
 
 def _load_reference_counts(path: str):
-    """Reference dynamics P for `bound`: an .glide artifact (use its counts) or an
-    .npy/.npz holding a count/transition matrix."""
+    """Load the reference dynamics P for the ``bound`` subcommand.
+
+    The reference may be a .glide artifact, in which case its stored counts are
+    used, or an .npy/.npz file holding a count or transition matrix.
+    """
     import numpy as np
     if _is_artifact_dir(path):
         from .artifact import load_artifact
@@ -78,8 +86,9 @@ def cmd_decompress(args):
     print("  kept frames           : %d  (CV-space, %d-D)" % (art.n_keep, art.cv_dim))
 
     if args.full_atom and art.residual is not None:
-        # T4: CV reconstructs the SLOW modes via a fitted linear decoder; the residual
-        # stage adds back the fast modes -> full 3N coordinates. CV-agnostic (TICA/VAMPnet).
+        # T4: the CVs reconstruct the slow modes via a fitted linear decoder, and
+        # the residual stage adds back the fast modes to yield the full 3N
+        # coordinates. This path is independent of the CV choice (TICA or VAMPnet).
         res = art.residual
         X_approx = (cv - np.asarray(res["cmean"])) @ np.asarray(res["B"]) + np.asarray(res["xmean"])
         rcodec = DitheredResidualCodec(n_bits=int(res["n_bits"]), seed=int(res["seed"]))
@@ -108,7 +117,7 @@ def cmd_bound(args):
     from .pathbound import report_kinetic_fidelity
     from .kinetic_codec import largest_connected_set, estimate_reversible_T
 
-    Q_art = load_artifact(args.artifact, with_flow=False)     # no torch
+    Q_art = load_artifact(args.artifact, with_flow=False)     # loaded without torch
     Cq = np.asarray(Q_art.counts, dtype=np.float64)
     Cp = np.asarray(_load_reference_counts(args.ref), dtype=np.float64)
     lag = args.lag if args.lag is not None else Q_art.lag
@@ -121,9 +130,11 @@ def cmd_bound(args):
               " k-means centers (see `glide benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
     Cp, Cq = Cp[:n, :n], Cq[:n, :n]
     act = largest_connected_set(Cp + Cq)        # ergodic under the combined counts
-    # `bound` is the PORTABLE scorer -- pure numpy, no torch/deeptime -- so it uses the
-    # (C+C^T)/2 estimator. For the publishable reversible-MLE timescales use `glide
-    # analyze` (deeptime). Both are reversible; the MLE is the less biased one.
+    # The `bound` subcommand is the portable scorer (pure numpy, no torch or
+    # deeptime) and therefore uses the (C+C^T)/2 symmetrized estimator. The
+    # reversible-MLE timescales suitable for publication are produced by
+    # `glide analyze` via deeptime. Both estimators are reversible; the MLE is
+    # the less biased of the two.
     P, _ = estimate_reversible_T(Cp[np.ix_(act, act)], prefer="cc")
     Q, _ = estimate_reversible_T(Cq[np.ix_(act, act)], prefer="cc")
     r = report_kinetic_fidelity(P, Q, lag=lag, L=L, k=4)
@@ -171,9 +182,11 @@ def cmd_bound(args):
 
 
 def cmd_analyze(args):
-    """Production kinetics (T2) from the artifact's stored run-aware dtraj: a
-    reversible maximum-likelihood MSM, an implied-timescale lag scan (the honest lag
-    choice), and Bayesian error bars -- all WITHOUT decoding any coordinates."""
+    """Estimate kinetics (T2) from the artifact's stored run-aware dtraj.
+
+    Computes a reversible maximum-likelihood MSM, an implied-timescale lag scan
+    for lag selection, and Bayesian error bars, without decoding any coordinates.
+    """
     import numpy as np
     from .artifact import load_artifact
     from . import kinetics_deeptime as kd
@@ -275,8 +288,11 @@ def cmd_analyze(args):
 
 
 def cmd_benchmark(args):
-    """T3 contrast: load the DCD, round-trip it through each method, score each
-    method's kinetic fidelity against the original MSM, and plot the contrast."""
+    """Compare methods (T3): round-trip the DCD through each method.
+
+    Loads the trajectory, reconstructs it under each method, scores each method's
+    kinetic fidelity against the original MSM, and plots the comparison.
+    """
     import numpy as np
     import mdtraj as md
     from .benchmark import run_benchmark
@@ -322,7 +338,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--n-bits", type=int, default=4, help="residual quantizer bit depth (T4)")
     c.add_argument("--streaming", action="store_true", help="out-of-core compress (T5)")
     c.add_argument("--chunk", type=int, default=2000, help="streaming chunk size (frames)")
-    # ML opt-ins (defaults = the tested baseline; T6-T8 enable the alternatives)
+    # Machine-learning opt-ins; defaults select the validated baseline, and the
+    # T6-T8 variants enable the alternatives.
     c.add_argument("--cv", choices=["tica", "vampnet"], default="tica")
     c.add_argument("--features", choices=["cartesian", "contacts"], default="cartesian",
                    help="TICA featurization: 'contacts' = invariant inter-atomic distances "

@@ -1,46 +1,64 @@
 """
-predictive_coder.py
-===================
-T9 -- learned PREDICTIVE temporal entropy coding (LOSSY), positioned as the novel-ML
-contribution. T8 (temporal_prior) codes the flow latents LOSSLESSLY against a learned
-causal conditional. T9 adds a LOSSY rate-distortion mode and is built on three decisions:
+Learned Predictive Temporal Entropy Coding (T9)
+===============================================
+Background
+----------
+T9 is the lossy learned predictive entropy coder. T8 (temporal_prior) codes the
+flow latents losslessly against a learned causal conditional; T9 adds a lossy
+rate-distortion mode. The design rests on three decisions.
 
-  D1 -- predictor: a CAUSAL GRU over the flow latents outputs, per step, a conditional
-        Gaussian (mu_t, log sigma_t) for the NEXT latent z_{t+1} given the reconstructed
-        past. GRU (not a transformer) so it stays STREAMING-compatible with T5 (online
-        hidden state, no full-context window). A causal-TCN predictor is available via
-        ``kind="tcn"``.
-  D2 -- objective (bound-as-loss, NOT coordinate MSE): the predictor is trained on the
-        conditional NLL of the next latent -- a tractable SURROGATE for the
-        TRANSITION-kernel term of the path bound. (The ENSEMBLE-term distortion is
-        realized at coding time by the quantizer; the rate-distortion curve sweeps it.)
-        Because the NLL is only a surrogate, the GATE measures the TRUE observable error
-        (CV-histogram KL, MSM implied-timescale error) and checks it against the
-        path-space Pinsker bound -- it is NOT assumed from the loss.
-  D3 -- residual coding: the STANDARDIZED innovation u = (z - mu)/sigma is quantized
-        with subtractive dithering and entropy-coded against a UNIT Gaussian; the
-        quantizer bit-width is the rate knob. Standardizing by the predicted scale is
-        the point -- the coded residual is ~unit-Gaussian regardless of frame, so where
-        the predictor is confident (small sigma) a given bit-width buys finer z-fidelity
-        -> fewer bits at equal distortion. T8's lossless coder is retained (it provides
-        the head-to-head baseline; the lossy-over-lossless gain is measured on the same
-        latents).
+Predictor
+---------
+A causal GRU over the flow latents outputs, at each step, a conditional Gaussian
+(mu_t, log sigma_t) for the next latent z_{t+1} given the reconstructed past. A
+GRU rather than a transformer is used so that the predictor remains
+streaming-compatible with T5 through an online hidden state, without a
+full-context window. A causal temporal-convolutional-network predictor is
+available via ``kind="tcn"``.
 
-Coding is CLOSED-LOOP (DPCM): both encoder and decoder feed the RECONSTRUCTED latents
-into the GRU, so they predict identically; decode is strictly frame-by-frame.
+Objective
+---------
+The predictor is trained on the conditional negative log-likelihood of the next
+latent, rather than coordinate MSE. This is a tractable surrogate for the
+transition-kernel term of the path bound. The ensemble-term distortion is
+realized at coding time by the quantizer, and the rate-distortion curve sweeps
+it. Because the negative log-likelihood is only a surrogate, the gate measures
+the true observable error (collective-variable histogram KL, MSM
+implied-timescale error) and checks it against the path-space Pinsker bound; it
+is not inferred from the training loss.
 
-Prior art (predictive / context-model entropy coding) -- CITE, do not claim:
-  * DPCM (differential pulse-code modulation): Cutler, 1952.
-  * Learned scale-hyperprior entropy model: Balle, Minnen, Singh, Hwang, Johnston,
-    "Variational image compression with a scale hyperprior", ICLR 2018 (arXiv:1802.01436).
-  * Autoregressive/context entropy model: Minnen, Balle, Toderici, "Joint Autoregressive
-    and Hierarchical Priors for Learned Image Compression", NeurIPS 2018 (arXiv:1809.02736).
-  VERIFY exact citations before the paper. The GRU/flow/CV are MACHINERY; the
-  contribution is the learned conditional entropy model + bound-as-loss + the integration.
+Residual coding
+---------------
+The standardized innovation u = (z - mu)/sigma is quantized with subtractive
+dithering and entropy-coded against a unit Gaussian, with the quantizer bit-width
+as the rate parameter. Standardizing by the predicted scale renders the coded
+residual approximately unit-Gaussian regardless of frame, so where the predictor
+is confident (small sigma) a given bit-width buys finer z-fidelity and thus fewer
+bits at equal distortion. The T8 lossless coder is retained as the head-to-head
+baseline, and the lossy-over-lossless gain is measured on the same latents.
 
-HONESTY: T9's rate gain over T8 is EMPIRICAL, measured on the trypsin-benzamidine set,
-reported against T8 -- never assumed. If T9 does not dominate T8 at equal observable
-error, that is reported as-is.
+Coding is closed-loop (DPCM, Cutler 1952): both encoder and decoder feed the
+reconstructed latents into the GRU, so they predict identically, and decoding
+proceeds strictly frame by frame.
+
+References
+----------
+The predictive and context-model entropy-coding methods are due to prior work and
+are cited here rather than claimed: differential pulse-code modulation (DPCM,
+Cutler 1952); the learned scale-hyperprior entropy model (Balle, Minnen, Singh,
+Hwang and Johnston, "Variational image compression with a scale hyperprior",
+ICLR 2018, arXiv:1802.01436); and the autoregressive context entropy model
+(Minnen, Balle and Toderici, "Joint Autoregressive and Hierarchical Priors for
+Learned Image Compression", NeurIPS 2018, arXiv:1809.02736). Exact citations are
+to be verified before publication. The GRU, flow, and collective variables are
+machinery; the contribution is the learned conditional entropy model, the
+bound-as-loss objective, and their integration.
+
+Scope
+-----
+The rate gain of T9 over T8 is empirical, measured on the trypsin-benzamidine set
+and reported against T8 rather than assumed. If T9 does not dominate T8 at equal
+observable error, that outcome is reported as observed.
 """
 from __future__ import annotations
 
@@ -55,8 +73,8 @@ from .temporal_prior import _RangeEncoder, _RangeDecoder, _CausalConv1d
 
 
 # ============================================================================
-# 1. predictors: causal GRU (default) and causal TCN, both predicting z_{t+1}
-#    from z_{<=t}. Interface: forward (teacher-forced) + advance (closed-loop).
+# 1. Predictors: causal GRU (default) and causal TCN, both predicting z_{t+1}
+#    from z_{<=t}. Interface: forward (teacher-forced) and advance (closed-loop).
 # ============================================================================
 class CausalGRUPredictor(nn.Module):
     def __init__(self, dim: int, hidden: int = 64, n_layers: int = 1):
@@ -68,8 +86,11 @@ class CausalGRUPredictor(nn.Module):
         nn.init.zeros_(self.head.bias)
 
     def forward(self, z):
-        """z: (B, T, dim) -> (mu, log_sigma), each (B, T, dim). mu[:, t] predicts
-        z[:, t+1] (causal: depends only on z[:, 0..t])."""
+        """Map z (B, T, dim) to (mu, log_sigma), each (B, T, dim).
+
+        The mean mu[:, t] predicts z[:, t+1] causally, depending only on
+        z[:, 0..t].
+        """
         o, _ = self.gru(z)
         mu, log_s = self.head(o).chunk(2, dim=-1)
         return mu, torch.tanh(log_s) * 3.0
@@ -79,8 +100,15 @@ class CausalGRUPredictor(nn.Module):
 
     @torch.no_grad()
     def advance(self, h, z_t):
-        """Feed the (reconstructed) latent z_t and return the prediction (mu, log_s)
-        for z_{t+1} plus the new hidden state. Deterministic (eval, CPU)."""
+        """Advance the closed loop by one step on the reconstructed latent z_t.
+
+        The prediction is deterministic (eval mode, CPU).
+
+        Returns
+        -------
+        tuple
+            (mu, log_s) for z_{t+1} and the updated hidden state.
+        """
         self.eval()
         zt = torch.as_tensor(np.asarray(z_t), dtype=torch.float32).view(1, 1, self.dim)
         o, h = self.gru(zt, h)
@@ -90,7 +118,10 @@ class CausalGRUPredictor(nn.Module):
         return mu, log_s, h
 
     def fit(self, z, epochs=200, lr=1e-3, weight_decay=0.0, verbose=False, seed=0):
-        """Train on the conditional NLL (the transition surrogate) -- NOT MSE."""
+        """Train on the conditional NLL (the transition surrogate), not on MSE.
+
+        Returns the fitted model.
+        """
         torch.manual_seed(seed)
         Z = torch.as_tensor(np.asarray(z), dtype=torch.float32).unsqueeze(0)
         opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
@@ -106,9 +137,12 @@ class CausalGRUPredictor(nn.Module):
 
 
 class CausalTCNPredictor(nn.Module):
-    """Causal dilated-CNN predictor (the TCN swap behind ``kind='tcn'``). Same train/
-    advance interface as the GRU; advance re-runs the net on the reconstructed prefix
-    (O(T*receptive-field)). Streaming via a fixed-length tail buffer."""
+    """Causal dilated-CNN predictor selected by ``kind='tcn'``.
+
+    The training and advance interface matches the GRU. The advance step re-runs
+    the network on the reconstructed prefix, with cost O(T x receptive_field), and
+    streaming is supported through a fixed-length tail buffer.
+    """
 
     def __init__(self, dim: int, hidden: int = 64, n_layers: int = 3, kernel: int = 3):
         super().__init__()
@@ -130,7 +164,7 @@ class CausalTCNPredictor(nn.Module):
         return mu, torch.tanh(log_s) * 3.0
 
     def init_state(self):
-        return np.zeros((0, self.dim))              # the reconstructed-prefix buffer
+        return np.zeros((0, self.dim))              # reconstructed-prefix buffer
 
     @torch.no_grad()
     def advance(self, buf, z_t):
@@ -162,9 +196,12 @@ def make_predictor(dim, kind="gru", hidden=64, n_layers=None):
 
 
 def conditional_nll(model, z):
-    """Mean conditional NLL (nats/value) of z_{t+1} under the predictor -- the
-    transition surrogate. Lower than the static-N(0,1) NLL means the predictor exploits
-    inter-frame structure (what a static prior cannot)."""
+    """Compute the mean conditional NLL (nats/value) of z_{t+1} under the predictor.
+
+    This is the transition surrogate. A value below the static N(0, 1) NLL
+    indicates that the predictor exploits inter-frame structure that a static
+    prior cannot capture.
+    """
     model.eval()
     with torch.no_grad():
         Z = torch.as_tensor(np.asarray(z), dtype=torch.float32).unsqueeze(0)
@@ -175,22 +212,33 @@ def conditional_nll(model, z):
 
 
 def static_gaussian_nll(z):
-    """Mean NLL of z under a STATIC N(0,1) prior (nats/value) -- the no-predictor floor."""
+    """Compute the mean NLL of z under a static N(0, 1) prior (nats/value).
+
+    This is the no-predictor floor.
+    """
     z = np.asarray(z, float)
     return float((0.5 * z ** 2 + 0.5 * math.log(2 * math.pi)).mean())
 
 
 # ============================================================================
-# 2. closed-loop standardized-innovation codec (LOSSY; bit-width = rate knob)
+# 2. Closed-loop standardized-innovation codec (lossy; bit-width is the rate
+#    parameter)
 # ============================================================================
 def _dither(T, dim, step, seed):
     return np.random.default_rng(seed).uniform(-step / 2, step / 2, size=(T, dim))
 
 
 def encode_predictive(z, model, bits, U=8.0, seed=0):
-    """Closed-loop DPCM encode of the latent sequence z (T, dim). Quantizes the
-    STANDARDIZED innovation at `bits` bits, codes it against a unit Gaussian. Returns
-    (coded_bytes, z_reconstructed, coded_levels)."""
+    """Closed-loop DPCM encode of the latent sequence z (T, dim).
+
+    The standardized innovation is quantized at ``bits`` bits and coded against a
+    unit Gaussian.
+
+    Returns
+    -------
+    tuple
+        (coded_bytes, z_reconstructed, coded_levels).
+    """
     z = np.asarray(z, dtype=np.float64)
     T, dim = z.shape
     L = 1 << bits
@@ -199,7 +247,7 @@ def encode_predictive(z, model, bits, U=8.0, seed=0):
     dith = _dither(T, dim, step, seed)
     enc = _RangeEncoder()
     h = model.init_state()
-    mu = np.zeros(dim); log_s = np.zeros(dim)        # z_0 prior: N(0,1)
+    mu = np.zeros(dim); log_s = np.zeros(dim)        # z_0 prior: N(0, 1)
     zhat = np.zeros((T, dim)); levels = np.zeros((T, dim), dtype=np.int64)
     for t in range(T):
         sigma = np.exp(log_s)
@@ -211,13 +259,20 @@ def encode_predictive(z, model, bits, U=8.0, seed=0):
         uhat = -U + (lev + 0.5) * step - dith[t]
         zhat[t] = mu + sigma * uhat
         levels[t] = lev
-        mu, log_s, h = model.advance(h, zhat[t])     # feed the RECONSTRUCTION
+        mu, log_s, h = model.advance(h, zhat[t])     # feed the reconstruction
     return enc.finish(), zhat, levels
 
 
 def decode_predictive(data, T, dim, model, bits, U=8.0, seed=0):
-    """Inverse of encode_predictive: decode strictly frame-by-frame, feeding each
-    reconstructed latent back into the GRU. Returns (z_reconstructed, levels)."""
+    """Decode the inverse of encode_predictive strictly frame by frame.
+
+    Each reconstructed latent is fed back into the GRU.
+
+    Returns
+    -------
+    tuple
+        (z_reconstructed, levels).
+    """
     L = 1 << bits
     step = 2 * U / L
     cum = gaussian_cumfreq(L, U)
@@ -237,12 +292,16 @@ def decode_predictive(data, T, dim, model, bits, U=8.0, seed=0):
 
 
 # ============================================================================
-# 3. rate-distortion accounting (T9) + the head-to-head with T8 (lossless)
+# 3. Rate-distortion accounting (T9) and the head-to-head with T8 (lossless)
 # ============================================================================
 def rate_distortion_curve(z, model, bits_list, U=8.0, seed=0):
-    """For each bit-width: (bits, rate bits/value, latent MSE distortion). The latent
-    MSE is the ENSEMBLE-term distortion proxy; the true observable error (CV-KL, ITS
-    error) is measured by the gate on real data."""
+    """Compute the rate-distortion curve over a list of bit-widths.
+
+    Each entry reports the bit-width, the rate in bits/value, and the latent MSE
+    distortion. The latent MSE is the ensemble-term distortion proxy; the true
+    observable error (collective-variable KL, implied-timescale error) is measured
+    by the gate on real data.
+    """
     z = np.asarray(z, float)
     n = z.shape[0] * z.shape[1]
     out = []

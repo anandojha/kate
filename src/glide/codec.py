@@ -1,33 +1,43 @@
 """
-codec.py
-========
-The GLIDE codec -- kinetics-preserving compression, the flow-based version from the
-abstract.
+GLIDE Codec for Kinetics-Preserving Compression
+===============================================
+This module implements the flow-based GLIDE codec, which compresses molecular
+configurations while preserving kinetic observables.
 
-Pipeline (each stage is the abstract's):
-  1. align (Kabsch) and learn a normalizing flow density p(x) over configurations
-     -- the flow is exactly invertible, so kept frames reconstruct exactly, and a
-     divergence measured in its Gaussian base z transfers to configuration space
-     without a Gaussian-reference assumption.
-  2. information-gain frame selection (IGFS): keep the subset of frames whose base-
-     space points best COVER the density (farthest-point sampling in z) -- this
-     preferentially retains rare/transition states, i.e. frames of high
-     thermodynamic information. This is the lossy step; nothing is corrupted, a
-     representative subset is chosen.
-  3. lossless entropy coding of the kept latents against the flow's own base
-     density N(0,I): the code length is -log2 p(z), the NLL in bits. The flow
-     having Gaussianized the data is exactly what makes this cheap.
-  4. the bound: a divergence between the compressed and original empirical
-     measures bounds the error of bounded observables (Pinsker). This is a
-     STATIC/ensemble guarantee. Kinetic observables are NOT covered by it -- so
-     the MSM transition matrix is retained separately as the dynamics term (the
-     path-distribution KL = ensemble term + transition term).
+Pipeline
+--------
+1. Alignment and density estimation
+   Configurations are aligned by the Kabsch algorithm, and a normalizing flow density
+   p(x) is learned over them. The flow is exactly invertible, so kept frames are
+   reconstructed exactly, and a divergence measured in its Gaussian base space z
+   transfers to configuration space without a Gaussian-reference assumption.
 
-Honest scope: this demo runs the flow on the full (small) Cartesian vector so that
-kept-frame reconstruction is exact. For a real protein (3N ~ 5000) you would either
-train a larger flow on GPU or dimensionality-reduce first and accept loss in the
-discarded fast modes. IGFS here is farthest-point sampling, one concrete instance
-of an information-gain selector.
+2. Information-gain frame selection
+   The subset of frames whose base-space points best cover the density is retained, by
+   farthest-point sampling in z. This preferentially retains rare and transition states,
+   that is, frames of high thermodynamic information. This stage is lossy in the sense
+   that frames are discarded; the retained data are not corrupted, a representative
+   subset being chosen.
+
+3. Lossless entropy coding
+   The kept latents are coded losslessly against the flow's base density N(0, I). The
+   code length is the negative log-likelihood in bits, -log2 p(z). Gaussianization of
+   the data by the flow is what makes this coding inexpensive.
+
+4. The bound
+   A divergence between the compressed and original empirical measures bounds the error
+   of bounded observables through the Pinsker inequality. This is a static, ensemble
+   guarantee. Kinetic observables are not covered by it, so the MSM transition matrix is
+   retained separately as the dynamics term. The path-distribution KL is the sum of the
+   ensemble term and the transition term.
+
+Scope
+-----
+This implementation runs the flow on the full, small Cartesian vector so that
+kept-frame reconstruction is exact. For a protein-scale system of size 3N of order
+5000, one would either train a larger flow on a GPU or reduce dimensionality first and
+accept loss in the discarded fast modes. The frame selector used here is
+farthest-point sampling, one concrete instance of an information-gain selector.
 """
 
 from __future__ import annotations
@@ -47,8 +57,9 @@ from .kinetic_codec import (
 
 
 # ============================================================================
-# Static (i.i.d.) arithmetic coder: code integer levels against ONE fixed PMF.
-# Same WNC core as the Markov coder, single cumulative table.
+# Static (i.i.d.) arithmetic coder: codes integer levels against a single fixed
+# probability mass function. The Witten-Neal-Cleary core matches that of the Markov
+# coder, using one cumulative-frequency table.
 # ============================================================================
 
 def encode_iid(levels: np.ndarray, cum: np.ndarray) -> bytes:
@@ -108,8 +119,11 @@ def decode_iid(data: bytes, n: int, cum: np.ndarray) -> np.ndarray:
 
 
 def gaussian_cumfreq(L: int, zmax: float) -> np.ndarray:
-    """Integer cumulative-frequency table for N(0,1) discretized into L bins on
-    [-zmax, zmax]. Encoder and decoder build the identical table."""
+    """Build the integer cumulative-frequency table for a discretized N(0, 1) density.
+
+    The standard normal density is discretized into L bins on the interval
+    [-zmax, zmax]. The encoder and decoder construct an identical table, which is
+    required for correct arithmetic coding."""
     edges = np.linspace(-zmax, zmax, L + 1)
     cdf = 0.5 * (1.0 + erf(edges / np.sqrt(2.0)))
     p = np.diff(cdf)
@@ -119,13 +133,15 @@ def gaussian_cumfreq(L: int, zmax: float) -> np.ndarray:
 
 
 # ============================================================================
-# Information-gain frame selection (farthest-point sampling in base space)
+# Information-gain frame selection by farthest-point sampling in base space.
 # ============================================================================
 
 def igfs_select(z: np.ndarray, n_keep: int, seed: int = 0) -> np.ndarray:
-    """Greedy farthest-point sampling in the flow's base space. Maximizes
-    coverage of the density -> keeps diverse and rare-state frames (high
-    information per frame). Returns sorted indices of kept frames."""
+    """Select frames by greedy farthest-point sampling in the flow's base space.
+
+    Maximizing coverage of the density retains diverse and rare-state frames, which
+    carry high information per frame. The sorted indices of the kept frames are
+    returned."""
     T = z.shape[0]
     n_keep = min(n_keep, T)
     rng = np.random.default_rng(seed)
@@ -145,14 +161,14 @@ def igfs_select(z: np.ndarray, n_keep: int, seed: int = 0) -> np.ndarray:
 
 @dataclass
 class GlideArtifact:
-    coded_latents: bytes          # entropy-coded base-space latents of kept frames
+    coded_latents: bytes          # entropy-coded base-space latents of the kept frames
     n_keep: int
     dim: int
     L: int
     zmax: float
-    flow: RealNVP                 # the invertible decoder + density (one-time model)
-    kept_idx: np.ndarray          # indices of the frames retained (coverage subset)
-    # dynamics term (kinetics), retained separately from the IGFS subset:
+    flow: RealNVP                 # invertible decoder and density model
+    kept_idx: np.ndarray          # indices of the retained coverage subset
+    # Dynamics term, retained separately from the frame-selection subset.
     T_msm: np.ndarray
     counts: np.ndarray
     lag: int
@@ -178,7 +194,7 @@ class GlideCodec:
         self.seed = seed
 
     def fit_encode(self, runs: List[np.ndarray], verbose=True) -> GlideArtifact:
-        # align + flatten
+        # Align and flatten the input runs.
         ref = None
         aligned = []
         for r in runs:
@@ -187,7 +203,7 @@ class GlideCodec:
         X = np.concatenate(aligned, axis=0)               # (T, 3N)
         dim = X.shape[1]
 
-        # --- stage 1: learn the flow density p(x) ---
+        # Stage 1: learn the flow density p(x).
         if verbose:
             print("  training flow density on %d frames x %d dims ..." % X.shape)
         flow = RealNVP(dim, hidden=self.flow_hidden, n_layers=self.flow_layers)
@@ -196,13 +212,13 @@ class GlideCodec:
             z_all, _ = flow.forward(torch.as_tensor(X, dtype=torch.float32))
         z_all = z_all.numpy()
 
-        # --- stage 2: information-gain frame selection ---
+        # Stage 2: information-gain frame selection.
         n_keep = max(2, int(self.n_keep_frac * X.shape[0]))
         kept = igfs_select(z_all, n_keep, seed=self.seed)
 
-        # --- stage 3: lossless entropy coding of kept latents vs N(0,I) ---
-        # IGFS deliberately keeps tail (large-|z|) frames, so size the grid to the
-        # data rather than clipping them.
+        # Stage 3: lossless entropy coding of the kept latents against N(0, I).
+        # Frame selection deliberately retains tail frames with large |z|, so the grid
+        # is sized to the data rather than clipping those frames.
         zmax = max(self.zmax, float(np.abs(z_all[kept]).max()) * 1.02)
         cum = gaussian_cumfreq(self.L, zmax)
         zc = np.clip(z_all[kept], -zmax, zmax)
@@ -210,7 +226,8 @@ class GlideCodec:
         levels = np.clip(levels, 0, self.L - 1).ravel()
         coded = encode_iid(levels, cum)
 
-        # --- dynamics term: MSM on the FULL trajectory's slow CVs ---
+        # Dynamics term: an MSM estimated on the slow collective variables of the full
+        # trajectory.
         tica = TICA(lag=self.tica_lag, n_components=self.tica_dim)
         white_runs = []
         off = 0
@@ -230,9 +247,9 @@ class GlideCodec:
 
     @staticmethod
     def decode_ensemble(ct: GlideArtifact) -> np.ndarray:
-        """Reconstruct the kept representative configurations (the compressed
-        ensemble). Exact up to latent quantization, because the flow inverts
-        exactly."""
+        """Reconstruct the kept representative configurations forming the compressed
+        ensemble. The reconstruction is exact up to latent quantization, since the flow
+        inverts exactly."""
         cum = gaussian_cumfreq(ct.L, ct.zmax)
         levels = decode_iid(ct.coded_latents, ct.n_keep * ct.dim, cum)
         levels = levels.reshape(ct.n_keep, ct.dim)

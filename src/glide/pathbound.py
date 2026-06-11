@@ -1,53 +1,73 @@
 """
-glide_pathbound.py
-================
-The kinetic half of the GLIDE guarantee: a divergence on the TRAJECTORY (path)
-distribution, not just the static ensemble. This is the module that turns the
-abstract's "analytic guarantee" into something that also covers KINETIC
-observables -- the part the ensemble (static) Pinsker bound does NOT cover.
+Kinetic Path-Distribution Bound for the GLIDE Guarantee
+=======================================================
+Background
+----------
+This module provides the kinetic component of the GLIDE guarantee: a divergence
+defined on the trajectory (path) distribution rather than only on the static
+ensemble. It extends the analytic guarantee to kinetic observables, which the
+static ensemble Pinsker bound does not cover.
 
-Why this module exists
-----------------------
-The ensemble bound in glide.py controls observables of single configurations:
-    |E_P[f] - E_Q[f]| <= sqrt( D(mu_P || mu_Q) / 2 )      for  f in [0,1].
-It says NOTHING about kinetics. Two ensembles with IDENTICAL stationary
-distributions can have arbitrarily different transition rates -- so preserving
-mu (what an ensemble-matching autoencoder does, e.g. matching a CV histogram or
-TICA-projection distribution) does NOT preserve k_on/k_off, MFPTs, or implied
-timescales.
+Motivation
+----------
+The ensemble bound implemented in glide.py controls observables of single
+configurations,
 
-For a Markov model at lag tau the path-distribution KL factorizes EXACTLY into
-an ENSEMBLE term + a TRANSITION (dynamics) term. With the lag-tau joint
-    rho_P(i,j) = mu_P(i) P(i,j),     rho_Q(i,j) = mu_Q(i) Q(i,j),
+    |E_P[f] - E_Q[f]| <= sqrt( D(mu_P || mu_Q) / 2 )    for f in [0, 1],
+
+but it provides no control over kinetics. Two ensembles with identical stationary
+distributions can have arbitrarily different transition rates, so preserving the
+stationary distribution mu (as an ensemble-matching autoencoder does when it
+matches a collective-variable histogram or a TICA-projection distribution) does
+not preserve k_on, k_off, mean first-passage times, or implied timescales.
+
+Path-KL factorization
+---------------------
+For a Markov model at lag tau, the path-distribution KL divergence factorizes
+exactly into an ensemble term and a transition (dynamics) term. With the lag-tau
+joint distributions
+
+    rho_P(i,j) = mu_P(i) P(i,j),    rho_Q(i,j) = mu_Q(i) Q(i,j),
+
+the divergence is
+
     D(rho_P || rho_Q) = D(mu_P || mu_Q)                       (ensemble term)
                       + sum_i mu_P(i) D( P(i,.) || Q(i,.) )    (transition term).
-Over a full trajectory of L consecutive frames (stationary Markov),
-    D(path_P || path_Q) = D(mu_P || mu_Q) + (L-1) * h(P||Q),
-    h(P||Q) = sum_i mu_P(i) sum_j P(i,j) log( P(i,j) / Q(i,j) )   (nats/step).
 
-Pinsker on the joint then bounds ANY bounded observable of consecutive pairs
-(x_t, x_{t+tau}):
-    |E_P[g] - E_Q[g]| <= sqrt( D(rho_P || rho_Q) / 2 ),   g in [0,1].
-Transition fluxes / counts -- which determine rates -- are exactly such pairwise
-observables, so this IS a kinetic guarantee. The ensemble term alone is not.
+Over a full trajectory of L consecutive frames under stationary Markov dynamics,
 
-How GLIDE uses it
----------------
+    D(path_P || path_Q) = D(mu_P || mu_Q) + (L - 1) h(P||Q),
+    h(P||Q) = sum_i mu_P(i) sum_j P(i,j) log( P(i,j) / Q(i,j) )    [nats/step].
+
+The Pinsker inequality applied to the joint then bounds any bounded observable of
+consecutive pairs (x_t, x_{t+tau}),
+
+    |E_P[g] - E_Q[g]| <= sqrt( D(rho_P || rho_Q) / 2 )    for g in [0, 1].
+
+Transition fluxes and counts, which determine rates, are exactly such pairwise
+observables, so this constitutes a kinetic guarantee; the ensemble term alone does
+not.
+
+Role within GLIDE
+----------------
 GLIDE retains the MSM transition matrix, so for the GLIDE artifact itself Q = P on
-the kept dynamics and the transition term is ~0 by construction -- i.e. GLIDE
-preserves kinetics. The module's real job is to be the MEASURING STICK for the
-contrast experiment: take ANY compressor's reconstruction, re-estimate its MSM
-Q at the same discretization, and report D(mu_P||mu_Q) (ensemble) vs the
-transition term (kinetics). An ensemble-only method shows ensemble ~ 0 but
-transition > 0 -- kinetics corrupted -- which the static bound would have
-WRONGLY certified as faithful. That contrast is the paper's central point.
+the retained dynamics and the transition term is approximately zero by
+construction, i.e. GLIDE preserves kinetics. The principal role of this module is
+to serve as the reference measure for the contrast experiment: given any
+compressor's reconstruction, its MSM Q is re-estimated at the same discretization,
+and the ensemble term D(mu_P || mu_Q) is reported against the transition term. An
+ensemble-only method shows an ensemble term near zero but a positive transition
+term, indicating corrupted kinetics that the static bound would have incorrectly
+certified as faithful. This contrast is the central result of the accompanying
+work.
 
-Honest scope
-------------
+Scope and conventions
+--------------------
 The factorization assumes a Markov model at the chosen lag (the MSM assumption
-you already make for kinetics) and stationary statistics. Report it ALONGSIDE an
-implied-timescale lag scan, not as a lag-independent certificate. All KLs are in
-NATS. Pure numpy; no torch, no deeptime.
+already made for kinetics) together with stationary statistics. The result should
+be reported alongside an implied-timescale lag scan rather than as a
+lag-independent certificate. All KL divergences are expressed in nats. The
+implementation uses only numpy; torch and deeptime are not required.
 """
 
 from __future__ import annotations
@@ -62,7 +82,10 @@ def _row_normalize(C):
 
 
 def stationary_distribution(P):
-    """Stationary vector of a row-stochastic P (left eigenvector, eigenvalue 1)."""
+    """Compute the stationary vector of a row-stochastic matrix P.
+
+    The stationary vector is the left eigenvector of P associated with eigenvalue
+    one."""
     P = np.asarray(P, dtype=np.float64)
     evals, evecs = np.linalg.eig(P.T)
     i = int(np.argmin(np.abs(evals - 1.0)))
@@ -72,38 +95,53 @@ def stationary_distribution(P):
 
 
 def ensemble_kl(mu_p, mu_q, eps=1e-12):
-    """D(mu_P || mu_Q) in NATS -- the static / ensemble term."""
+    """Compute the ensemble term D(mu_P || mu_Q) in nats.
+
+    This is the static ensemble contribution to the path divergence."""
     p = np.clip(np.asarray(mu_p, float), eps, None); p = p / p.sum()
     q = np.clip(np.asarray(mu_q, float), eps, None); q = q / q.sum()
     return float((p * np.log(p / q)).sum())
 
 
 def transition_kl_rate(P, Q, mu_p=None, eps=1e-12):
-    """Transition (dynamics) term  h(P||Q) = sum_i mu_P(i) sum_j P_ij log(P_ij/Q_ij),
-    in NATS PER STEP. mu_P defaults to P's stationary distribution. Q must place
-    mass wherever P does (absolute continuity); we clip Q to keep the result
+    """Compute the transition (dynamics) term h(P||Q) in nats per step.
+
+    The transition term is
+
+        h(P||Q) = sum_i mu_P(i) sum_j P_ij log( P_ij / Q_ij )    [nats/step].
+
+    By default mu_P is the stationary distribution of P. Absolute continuity
+    requires Q to place mass wherever P does; Q is clipped to keep the result
     finite. If Q has structural zeros where P does not, the true divergence is
-    +inf and the clipped value is a (large) lower bound -- check `support_ok`."""
+    infinite and the clipped value is a large lower bound; the `support_ok`
+    predicate should be used to detect this case."""
     P = np.asarray(P, float); Q = np.asarray(Q, float)
     if mu_p is None:
         mu_p = stationary_distribution(P)
     Pc = np.clip(P, eps, None)
     Qc = np.clip(Q, eps, None)
-    row = (Pc * np.log(Pc / Qc)).sum(axis=1)          # D(P(i,.)||Q(i,.)) per state
+    row = (Pc * np.log(Pc / Qc)).sum(axis=1)          # per-state D(P(i,.)||Q(i,.))
     return float((np.asarray(mu_p, float) * row).sum())
 
 
 def support_ok(P, Q, eps=1e-12):
-    """True if Q is positive wherever P is (so the path KL is finite)."""
+    """Return True if Q is positive wherever P is, so the path KL is finite."""
     P = np.asarray(P, float); Q = np.asarray(Q, float)
     return bool(np.all(Q[P > eps] > eps))
 
 
 def two_slice_kl(P, Q, mu_p=None, mu_q=None):
-    """D( rho_P || rho_Q ) for the lag-tau joint rho(i,j) = mu(i) P(i,j).
-    Returns (total, ensemble_term, transition_term), all in nats. This is the
-    divergence whose Pinsker bound covers observables of (x_t, x_{t+tau}) pairs,
-    i.e. transition fluxes / rates."""
+    """Compute D(rho_P || rho_Q) for the lag-tau joint rho(i,j) = mu(i) P(i,j).
+
+    This is the divergence whose Pinsker bound covers observables of
+    (x_t, x_{t+tau}) pairs, that is, transition fluxes and rates.
+
+    Returns
+    -------
+    tuple of float
+        The total divergence, the ensemble term, and the transition term, all in
+        nats.
+    """
     P = np.asarray(P, float); Q = np.asarray(Q, float)
     if mu_p is None: mu_p = stationary_distribution(P)
     if mu_q is None: mu_q = stationary_distribution(Q)
@@ -113,10 +151,14 @@ def two_slice_kl(P, Q, mu_p=None, mu_q=None):
 
 
 def path_kl(P, Q, L, mu_p=None, mu_q=None):
-    """KL between path measures of L consecutive frames (stationary Markov):
-    D(path) = D(mu_P||mu_Q) + (L-1) h(P||Q), in nats. It GROWS with trajectory
-    length -- kinetic error accumulates over a trajectory, while ensemble error
-    does not."""
+    """Compute the KL divergence between path measures of L consecutive frames.
+
+    Under stationary Markov dynamics,
+
+        D(path) = D(mu_P || mu_Q) + (L - 1) h(P||Q)    [nats].
+
+    The divergence grows with trajectory length, reflecting that kinetic error
+    accumulates over a trajectory whereas ensemble error does not."""
     if mu_p is None: mu_p = stationary_distribution(P)
     if mu_q is None: mu_q = stationary_distribution(Q)
     ens = ensemble_kl(mu_p, mu_q)
@@ -125,8 +167,12 @@ def path_kl(P, Q, L, mu_p=None, mu_q=None):
 
 
 def pinsker(kl_nats):
-    """Bounded-observable / total-variation bound: |E_P[g]-E_Q[g]| <= sqrt(KL/2)
-    for g in [0,1], KL in nats."""
+    """Apply the Pinsker bounded-observable bound.
+
+    For g in [0, 1] and a KL divergence in nats, the bound is
+
+        |E_P[g] - E_Q[g]| <= sqrt( KL / 2 ).
+    """
     return float(np.sqrt(max(float(kl_nats), 0.0) / 2.0))
 
 
@@ -138,11 +184,19 @@ def implied_timescales(P, lag=1, k=5):
 
 def report_kinetic_fidelity(P_ref, Q_cmp, lag=1, L=None,
                             mu_ref=None, mu_cmp=None, k=4):
-    """Compare a reference dynamics P_ref against a compressed/reconstructed
-    dynamics Q_cmp at a given lag. P_ref, Q_cmp may be transition matrices or raw
-    count matrices (row-normalized here). Returns the ensemble term, transition
-    term, two-slice KL + Pinsker pair bound, optional path KL, the support check,
-    and the implied timescales of both (the kinetic observable that must match).
+    """Compare a reference dynamics against a reconstructed dynamics at a lag.
+
+    The reference dynamics P_ref and the compressed or reconstructed dynamics Q_cmp
+    may be supplied as transition matrices or as raw count matrices, which are
+    row-normalized here.
+
+    Returns
+    -------
+    dict
+        A report containing the ensemble term, the transition term, the two-slice
+        KL with its Pinsker pair bound, an optional path KL, the support check, and
+        the implied timescales of both dynamics, the latter being the kinetic
+        observable that must match.
     """
     P_ref = _row_normalize(P_ref); Q_cmp = _row_normalize(Q_cmp)
     if mu_ref is None: mu_ref = stationary_distribution(P_ref)
@@ -152,17 +206,18 @@ def report_kinetic_fidelity(P_ref, Q_cmp, lag=1, L=None,
     out = {
         "lag": lag,
         "support_ok": ok,
-        # When support fails (Q has a structural zero where P is positive -- e.g. a
-        # transition the compressor never reproduces) the TRUE path divergence is +inf;
-        # the clipped transition/pair/path numbers below are then only LOWER BOUNDS, and
-        # the Pinsker bounds DO NOT hold. `kinetic_bound_valid` says whether to trust them.
+        # When the support check fails, Q has a structural zero where P is positive
+        # (for example a transition the compressor never reproduces), so the true
+        # path divergence is infinite. The clipped transition, pair, and path values
+        # below are then only lower bounds and the Pinsker bounds do not hold. The
+        # field `kinetic_bound_valid` indicates whether these values may be trusted.
         "kinetic_bound_valid": ok,
         "ensemble_kl_nats": ens,
         "transition_kl_rate_nats_per_step": tran,
         "transition_kl_is_lower_bound": not ok,
         "two_slice_kl_nats": total,
         "pinsker_pair_bound": pinsker(total) if ok else float("inf"),
-        "pinsker_ensemble_bound": pinsker(ens),   # ensemble term never has support issues
+        "pinsker_ensemble_bound": pinsker(ens),   # ensemble term has no support issues
         "its_ref": implied_timescales(P_ref, lag, k),
         "its_cmp": implied_timescales(Q_cmp, lag, k),
     }

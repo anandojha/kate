@@ -1,36 +1,48 @@
 """
-temporal_prior.py
-=================
-T8 -- the temporal + learned-entropy model (the defensibly-novel ML piece).
+Temporal Prior and Learned-Entropy Coding (T8)
+==============================================
+Background
+----------
+The flow Gaussianizes each frame, so the latents z_t are marginally distributed
+as N(0, I). Consecutive frames remain correlated, so the sequence z_1..z_T is not
+independent. A causal sequence model learns the conditional p(z_t | z_{<t}), and
+coding each latent against that learned conditional, a context model in the sense
+of learned image and video compression (Balle et al., ICLR 2018; Minnen et al.,
+NeurIPS 2018), shortens the code wherever frames are predictable relative to the
+fixed N(0, I) base.
 
-The flow already Gaussianizes EACH FRAME, so its latents z_t are ~N(0,I) marginally.
-But consecutive frames are correlated, so the SEQUENCE z_1..z_T is not i.i.d. A causal
-sequence model learns p(z_t | z_{<t}); coding each latent against that LEARNED
-conditional (a "context model" / "hyperprior", cf. learned image/video compression)
-instead of the fixed N(0,I) base shortens the code wherever frames are predictable.
+Scope
+-----
+This model changes only the entropy coder's probability model, and therefore only
+the code length. The flow, the reconstruction, and the KL/Pinsker bound are
+unchanged, and the coder remains exactly lossless, since arithmetic coding is
+exact regardless of the probability model used.
 
-What this does and does NOT touch (the thesis stays intact):
-  * It changes ONLY the entropy coder's probability model -> only the CODE LENGTH.
-  * The flow, the reconstruction, and the KL/Pinsker bound are UNCHANGED. The coder
-    stays EXACTLY lossless (arithmetic coding is exact regardless of the model used).
+Losslessness
+------------
+Arithmetic coding desynchronizes if the encoder and decoder ever construct
+different probability tables for a symbol. The following conditions ensure exact
+inversion:
+  1. The conditional is predicted deterministically (CPU, float32, eval() mode,
+     with no dropout or nondeterministic operations).
+  2. The predicted Gaussian is discretized onto the same fixed grid as the
+     independent coder and converted through the same integer
+     ``_probs_to_cumfreq`` to an integer cumulative-frequency table. Coding is
+     performed against that integer table, so sub-ULP float variation that leaves
+     the table unchanged is harmless.
+  3. The context is the quantized reconstruction (dequantized levels), never the
+     original continuous z, so encode and decode condition on identical values.
+  4. Decoding proceeds strictly frame by frame, feeding each decoded latent back
+     as context.
+``encode_sequence`` and ``decode_sequence`` are exact inverses, as asserted in
+the tests.
 
-LOSSLESSNESS -- the correctness landmine. Arithmetic coding desyncs catastrophically
-if the encoder and decoder ever build a different probability table for a symbol. So:
-  1. The model predicts the conditional DETERMINISTICALLY (CPU, float32, eval() mode,
-     no dropout / nondeterministic ops).
-  2. The predicted Gaussian is discretized onto the SAME fixed grid as the i.i.d.
-     coder and converted via the SAME integer ``_probs_to_cumfreq`` -> an INTEGER
-     cumulative-frequency table. Coding is against that integer table, so sub-ULP
-     float wobble that leaves the table unchanged is harmless.
-  3. The context is the QUANTIZED reconstruction (dequantized levels), never the
-     original continuous z -- so encode and decode condition on the SAME values.
-  4. Decode is strictly FRAME-BY-FRAME, feeding each decoded latent back as context.
-``encode_sequence`` / ``decode_sequence`` are exact inverses (asserted in tests).
-
-HONEST RATE CLAIM: at 100 ps frame spacing consecutive frames are fairly
-decorrelated, so the real-data gain may be MODEST. The synthetic test proves the
-MECHANISM (rate(temporal) <= rate(gaussian) on a correlated sequence); the real-data
-gain is empirical -- do not pre-promise a big win.
+Rate
+----
+At 100 ps frame spacing consecutive frames are largely decorrelated, so the
+real-data gain may be modest. The synthetic test establishes the mechanism, that
+rate(temporal) <= rate(gaussian) on a correlated sequence; the real-data gain is
+empirical.
 """
 from __future__ import annotations
 
@@ -47,7 +59,7 @@ from .kinetic_codec import (_BitWriter, _BitReader, _HALF, _QUARTER, _3QUARTER,
 
 
 # ============================================================================
-# 1. causal sequence model: predict (mu_t, log_sigma_t) from z_{<t}
+# 1. Causal sequence model: predict (mu_t, log_sigma_t) from z_{<t}
 # ============================================================================
 class _CausalConv1d(nn.Module):
     def __init__(self, ci, co, k, dilation):
@@ -60,10 +72,13 @@ class _CausalConv1d(nn.Module):
 
 
 class TemporalPrior(nn.Module):
-    """A small causal dilated-CNN that outputs, for each step t, the mean and
-    log-scale of a per-dimension Gaussian conditional p(z_t | z_{<t}). Output t depends
-    ONLY on inputs < t (a right shift + causal convolutions), so frame 0 is predicted
-    from "nothing" (-> ~N(0,1), the base)."""
+    """Causal dilated-CNN conditional prior over a latent sequence.
+
+    For each step t the network outputs the mean and log-scale of a per-dimension
+    Gaussian conditional p(z_t | z_{<t}). Output t depends only on inputs before t
+    (a right shift combined with causal convolutions), so frame 0 is predicted
+    from no context and reverts to the N(0, 1) base.
+    """
 
     def __init__(self, dim: int, hidden: int = 64, n_layers: int = 3, kernel: int = 3):
         super().__init__()
@@ -81,9 +96,9 @@ class TemporalPrior(nn.Module):
         nn.init.zeros_(self.head.bias)
 
     def forward(self, z):
-        """z: (B, T, dim) -> (mu, log_sigma), each (B, T, dim). Causal."""
+        """Map z (B, T, dim) to (mu, log_sigma), each (B, T, dim), causally."""
         x = z.transpose(1, 2)                       # (B, dim, T)
-        x = F.pad(x, (1, 0))[:, :, :-1]             # shift right: output t sees < t
+        x = F.pad(x, (1, 0))[:, :, :-1]             # right shift: output t sees < t
         h = self.body(x)
         out = self.head(h).transpose(1, 2)          # (B, T, 2*dim)
         mu, log_s = out.chunk(2, dim=-1)
@@ -91,7 +106,10 @@ class TemporalPrior(nn.Module):
         return mu, log_s
 
     def fit(self, z, epochs=200, lr=1e-3, weight_decay=0.0, verbose=False, seed=0):
-        """Train on one latent sequence z (T, dim) by minimizing the Gaussian NLL."""
+        """Train on one latent sequence z (T, dim) by minimizing the Gaussian NLL.
+
+        Returns the fitted model.
+        """
         torch.manual_seed(seed)
         Z = torch.as_tensor(np.asarray(z), dtype=torch.float32).unsqueeze(0)  # (1,T,dim)
         opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
@@ -106,8 +124,15 @@ class TemporalPrior(nn.Module):
 
     @torch.no_grad()
     def predict_all(self, zq):
-        """One-shot causal predictions on the QUANTIZED context zq (T, dim). Returns
-        (mu, log_sigma) as float64 numpy. Deterministic (eval mode, CPU)."""
+        """Compute one-shot causal predictions on the quantized context zq (T, dim).
+
+        The prediction is deterministic (eval mode, CPU).
+
+        Returns
+        -------
+        tuple
+            (mu, log_sigma) as float64 numpy arrays.
+        """
         self.eval()
         Z = torch.as_tensor(np.asarray(zq), dtype=torch.float32).unsqueeze(0)
         mu, log_s = self.forward(Z)
@@ -115,9 +140,17 @@ class TemporalPrior(nn.Module):
 
     @torch.no_grad()
     def predict_step(self, zq_prefix, t):
-        """Causal prediction for step t from a (T, dim) buffer whose rows < t hold the
-        decoded latents (rows >= t are ignored by causality). Returns (mu_t, log_s_t)
-        as float64 numpy vectors. Used by the frame-by-frame decoder."""
+        """Compute the causal prediction for step t from a decoded-prefix buffer.
+
+        The (T, dim) buffer holds the decoded latents in rows before t; rows at or
+        after t are ignored by causality. This method is used by the
+        frame-by-frame decoder.
+
+        Returns
+        -------
+        tuple
+            (mu_t, log_s_t) as float64 numpy vectors.
+        """
         self.eval()
         Z = torch.as_tensor(np.asarray(zq_prefix), dtype=torch.float32).unsqueeze(0)
         mu, log_s = self.forward(Z)
@@ -125,7 +158,8 @@ class TemporalPrior(nn.Module):
 
 
 # ============================================================================
-# 2. quantization grid (shared by encoder and decoder; matches codec.gaussian_cumfreq)
+# 2. Quantization grid (shared by encoder and decoder; matches
+#    codec.gaussian_cumfreq)
 # ============================================================================
 def _grid(L, zmax):
     return np.linspace(-zmax, zmax, L + 1)
@@ -141,8 +175,12 @@ def dequantize(levels, L, zmax):
 
 
 def _cond_cumfreq(mu, log_s, edges):
-    """Integer cumfreq table for a Gaussian(mu, exp(log_s)) discretized on `edges`.
-    Deterministic; the integer table absorbs sub-ULP float wobble."""
+    """Build an integer cumulative-frequency table for a discretized Gaussian.
+
+    The Gaussian has mean ``mu`` and scale ``exp(log_s)`` and is discretized on
+    ``edges``. The computation is deterministic, and the integer table absorbs
+    sub-ULP float variation.
+    """
     sigma = max(float(np.exp(log_s)), 1e-6)
     cdf = 0.5 * (1.0 + erf((edges - mu) / (sigma * np.sqrt(2.0))))
     p = np.clip(np.diff(cdf), 1e-12, None)
@@ -151,7 +189,7 @@ def _cond_cumfreq(mu, log_s, edges):
 
 
 # ============================================================================
-# 3. stateful WNC range coder (per-symbol cumulative-frequency tables)
+# 3. Stateful WNC range coder (per-symbol cumulative-frequency tables)
 # ============================================================================
 class _RangeEncoder:
     def __init__(self):
@@ -209,18 +247,21 @@ class _RangeDecoder:
 
 
 # ============================================================================
-# 4. sequence codec (exact inverses)
+# 4. Sequence codec (exact inverses)
 # ============================================================================
 def encode_sequence(z, model: TemporalPrior, L: int, zmax: float) -> bytes:
-    """Code the latent sequence z (T, dim) against the learned conditional. The context
-    is the QUANTIZED reconstruction (so encode/decode see identical context); the model
-    predicts in one causal pass; coding is symbol-by-symbol (frame, then dim)."""
+    """Encode the latent sequence z (T, dim) against the learned conditional.
+
+    The context is the quantized reconstruction, so the encoder and decoder
+    condition on identical values. The model predicts in one causal pass, and
+    coding proceeds symbol by symbol (frame, then dimension).
+    """
     z = np.asarray(z, dtype=np.float64)
     T, dim = z.shape
     edges = _grid(L, zmax)
     levels = quantize(z, L, zmax)
     zq = dequantize(levels, L, zmax)                 # the reconstruction context
-    mu, log_s = model.predict_all(zq)                # (T, dim) one-shot causal
+    mu, log_s = model.predict_all(zq)                # (T, dim), one-shot causal
     enc = _RangeEncoder()
     for t in range(T):
         for d in range(dim):
@@ -230,14 +271,21 @@ def encode_sequence(z, model: TemporalPrior, L: int, zmax: float) -> bytes:
 
 def decode_sequence(data: bytes, T: int, dim: int, model: TemporalPrior,
                     L: int, zmax: float) -> np.ndarray:
-    """Inverse of encode_sequence: decode frame-by-frame, feeding the decoded
-    (quantized) latents back as context. Returns the reconstructed levels (T, dim)."""
+    """Decode the inverse of encode_sequence frame by frame.
+
+    Each decoded (quantized) latent is fed back as context.
+
+    Returns
+    -------
+    numpy.ndarray
+        The reconstructed levels (T, dim).
+    """
     edges = _grid(L, zmax)
     dec = _RangeDecoder(data)
     zq = np.zeros((T, dim), dtype=np.float64)
     levels = np.zeros((T, dim), dtype=np.int64)
     for t in range(T):
-        mu_t, log_s_t = model.predict_step(zq, t)    # from decoded rows < t
+        mu_t, log_s_t = model.predict_step(zq, t)    # from decoded rows before t
         for d in range(dim):
             s = dec.decode(_cond_cumfreq(mu_t[d], log_s_t[d], edges))
             levels[t, d] = s
@@ -246,11 +294,14 @@ def decode_sequence(data: bytes, T: int, dim: int, model: TemporalPrior,
 
 
 # ============================================================================
-# 5. rate accounting (with vs without the temporal model)
+# 5. Rate accounting (with and without the temporal model)
 # ============================================================================
 def gaussian_rate_bits_per_value(z, L, zmax):
-    """Bits/value coding the SAME quantized levels against the fixed N(0,I) base
-    (the i.i.d. baseline -- what GLIDE's coder does today)."""
+    """Compute bits/value coding the quantized levels against the N(0, I) base.
+
+    This is the independent baseline coded against the fixed N(0, I) prior, as in
+    the current GLIDE coder.
+    """
     from .codec import gaussian_cumfreq, encode_iid
     levels = quantize(np.asarray(z), L, zmax).ravel()
     coded = encode_iid(levels, gaussian_cumfreq(L, zmax))
@@ -258,6 +309,6 @@ def gaussian_rate_bits_per_value(z, L, zmax):
 
 
 def temporal_rate_bits_per_value(z, model, L, zmax):
-    """Bits/value coding the SAME quantized levels against the learned conditional."""
+    """Compute bits/value coding the quantized levels against the learned conditional."""
     coded = encode_sequence(z, model, L, zmax)
     return 8.0 * len(coded) / (np.asarray(z).shape[0] * np.asarray(z).shape[1])
