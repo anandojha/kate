@@ -106,7 +106,7 @@ def cmd_bound(args):
     import numpy as np
     from .artifact import load_artifact
     from .pathbound import report_kinetic_fidelity
-    from .kinetic_codec import largest_connected_set, transition_matrix
+    from .kinetic_codec import largest_connected_set, estimate_reversible_T
 
     Q_art = load_artifact(args.artifact, with_flow=False)     # no torch
     Cq = np.asarray(Q_art.counts, dtype=np.float64)
@@ -121,8 +121,11 @@ def cmd_bound(args):
               " k-means centers (see `glide benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
     Cp, Cq = Cp[:n, :n], Cq[:n, :n]
     act = largest_connected_set(Cp + Cq)        # ergodic under the combined counts
-    P, _ = transition_matrix(Cp[np.ix_(act, act)], reversible=True)
-    Q, _ = transition_matrix(Cq[np.ix_(act, act)], reversible=True)
+    # `bound` is the PORTABLE scorer -- pure numpy, no torch/deeptime -- so it uses the
+    # (C+C^T)/2 estimator. For the publishable reversible-MLE timescales use `glide
+    # analyze` (deeptime). Both are reversible; the MLE is the less biased one.
+    P, _ = estimate_reversible_T(Cp[np.ix_(act, act)], prefer="cc")
+    Q, _ = estimate_reversible_T(Cq[np.ix_(act, act)], prefer="cc")
     r = report_kinetic_fidelity(P, Q, lag=lag, L=L, k=4)
 
     dt = Q_art.dt_strided_ns
@@ -131,6 +134,8 @@ def cmd_bound(args):
     print("  artifact (Q)          : %s" % args.artifact)
     print("  reference (P)         : %s" % args.ref)
     print("  active states         : %d" % len(act))
+    print("  MSM estimator         : (C+C^T)/2 symmetrized (portable; `glide analyze` "
+          "gives the deeptime reversible-MLE timescales)")
     print("-" * 72)
     print("  ensemble term   D(mu_P||mu_Q)     : %.4e nats   (STATIC bound sees only this)"
           % r["ensemble_kl_nats"])

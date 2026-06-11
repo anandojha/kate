@@ -55,6 +55,8 @@ class Artifact:
     cv: str = "tica"                   # 'tica' | 'vampnet'
     flow_kind: str = "realnvp"         # 'realnvp' | 'spline'
     entropy: str = "gaussian"          # 'gaussian' | 'temporal'
+    msm_estimator: str = "symmetrized-cc"   # which estimator backs the reported kinetics
+                                            # ('deeptime-mle' | 'symmetrized-cc')
     # --- featurizer params (CV transform; small, kept for T4/recon) ---
     tica_mean: Optional[np.ndarray] = None
     tica_eigvecs: Optional[np.ndarray] = None
@@ -119,7 +121,7 @@ class Artifact:
 # config.json holds only JSON-friendly scalars/lists/strings.
 _CONFIG_KEYS = ("cv_dim", "L", "zmax", "n_keep", "run_lengths", "n_states", "lag",
                 "stride", "dt_ps", "dt_strided_ns", "flow_arch", "cv", "flow_kind",
-                "entropy", "temporal_arch", "predictive_arch")
+                "entropy", "msm_estimator", "temporal_arch", "predictive_arch")
 
 
 def save_artifact(art: Artifact, path: str) -> str:
@@ -212,6 +214,7 @@ def load_artifact(path: str, with_flow: bool = True) -> Artifact:
         flow_arch=dict(cfg["flow_arch"]),
         cv=cfg.get("cv", "tica"), flow_kind=cfg.get("flow_kind", "realnvp"),
         entropy=cfg.get("entropy", "gaussian"),
+        msm_estimator=cfg.get("msm_estimator", "symmetrized-cc"),
         tica_mean=npz["tica_mean"] if "tica_mean" in npz.files else None,
         tica_eigvecs=npz["tica_eigvecs"] if "tica_eigvecs" in npz.files else None,
         tica_timescales=npz["tica_timescales"] if "tica_timescales" in npz.files else None,

@@ -28,7 +28,7 @@ import torch
 from .flow import RealNVP
 from .codec import igfs_select, encode_iid, decode_iid, gaussian_cumfreq
 from .kinetic_codec import (kabsch_align, TICA, discretize, count_matrix,
-                            transition_matrix, implied_timescales,
+                            transition_matrix, estimate_reversible_T, implied_timescales,
                             largest_connected_set, DitheredResidualCodec)
 from .inspect_traj import heavy_indices
 from .pathbound import report_kinetic_fidelity
@@ -100,11 +100,14 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     obs = abs(float((CV_all[:, 0] > mid).mean()) - float((samp[:, 0] > mid).mean()))
 
     # --- dynamics term: run-aware MSM on the CVs ---
+    # REPORTED kinetics (timescales + the path bound) use the reversible MLE (deeptime)
+    # when available, falling back to the (C+C^T)/2 estimator otherwise; `msm_estimator`
+    # records which. The full-size T_msm stored for convenience stays the pure-numpy one.
     labels, centers = discretize(CV_runs, nstates, seed)
     C = count_matrix(labels, nstates, lag)
     T_msm, _ = transition_matrix(C, reversible=True)
     act = largest_connected_set(C)
-    Tm_act, _ = transition_matrix(C[np.ix_(act, act)], reversible=True)
+    Tm_act, msm_estimator = estimate_reversible_T(C[np.ix_(act, act)])
     its = implied_timescales(Tm_act, lag, 5)
     its_ns = its * dt_strided_ns
     kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # GLIDE: Q==P
@@ -175,7 +178,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         cv_dim=cv_dim, L=L, zmax=zmax, n_keep=len(kept),
         coded_latents=coded, kept_idx=kept,
         run_lengths=run_lengths, dtraj=labels, centers=centers, counts=C,
-        T_msm=T_msm, n_states=nstates, lag=lag,
+        T_msm=T_msm, msm_estimator=msm_estimator, n_states=nstates, lag=lag,
         stride=stride, dt_ps=dt_ps, dt_strided_ns=dt_strided_ns,
         flow_arch=flow_arch,
         cv=cv_meta["cv"], flow_kind=flow_kind, entropy=entropy,
@@ -196,6 +199,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         "residual_bits": int(rq.size) * n_bits, "state_mean_bits": int(state_mean_R.size) * 32,
         "flow_bytes": flow_bytes, "coded_bytes": len(coded),
         "implied_timescales_ns": its_ns, "lag": lag, "dt_strided_ns": dt_strided_ns,
+        "msm_estimator": msm_estimator,
         "kinetic_bound": kin, "entropy": entropy, "cv": cv_meta["cv"],
         "vamp_score": cv_meta.get("vamp_score"),
         "rate_gaussian_bpv": rate_gaussian_bpv, "rate_temporal_bpv": rate_temporal_bpv,
@@ -407,6 +411,10 @@ def print_report(report: dict) -> None:
         print("  NOTE: rate gain over T8 is EMPIRICAL -- the rate-vs-observable-error gate")
         print("  (CV-KL, MSM timescale error, vs the path bound) runs on the trypsin set.")
     print("KINETICS (MSM dynamics term)")
+    _est = r.get("msm_estimator", "symmetrized-cc")
+    print("  MSM estimator         : %s" % (
+        "deeptime reversible MLE (publishable)" if _est == "deeptime-mle"
+        else "(C+C^T)/2 symmetrized -- deeptime absent; install glide[kinetics] for the MLE"))
     print("  implied timescales    : %s ns" % np.round(r["implied_timescales_ns"], 1))
     print("KINETIC BOUND (path-distribution; retained Q vs reference P = full-data MSM)")
     print("  ensemble term         : %.3e nats" % kin["ensemble_kl_nats"])

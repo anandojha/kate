@@ -37,7 +37,7 @@ import numpy as np
 
 try:
     from deeptime.markov.msm import MaximumLikelihoodMSM, BayesianMSM
-    from deeptime.markov import TransitionCountEstimator
+    from deeptime.markov import TransitionCountEstimator, TransitionCountModel
     from deeptime.clustering import KMeans
     from deeptime.decomposition import TICA
     _HAVE_DEEPTIME = True
@@ -45,6 +45,19 @@ try:
 except Exception as _e:                              # pragma: no cover
     _HAVE_DEEPTIME = False
     _IMPORT_ERR = _e
+
+
+def reversible_mle_from_counts(C, reversible=True):
+    """Reversible MAXIMUM-LIKELIHOOD transition matrix from a COUNT matrix, restricted to
+    its largest connected set. Returns (T_active, active_state_indices). This is the
+    PUBLISHABLE estimator -- a proper detailed-balance MLE (deeptime), not the crude
+    (C+C^T)/2 symmetrization. Used by `kinetic_codec.estimate_reversible_T` to back the
+    reported timescales / path bound when deeptime is available."""
+    _require()
+    import numpy as _np
+    tcm = TransitionCountModel(_np.asarray(C, dtype=_np.float64)).submodel_largest()
+    msm = MaximumLikelihoodMSM(reversible=reversible).fit_fetch(tcm)
+    return msm.transition_matrix, _np.asarray(tcm.state_symbols, dtype=_np.int64)
 
 
 def _require():

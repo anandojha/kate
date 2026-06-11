@@ -456,9 +456,12 @@ def count_matrix(labels: List[np.ndarray], n_states: int, lag: int = 1
 
 def transition_matrix(C: np.ndarray, reversible: bool = True
                       ) -> Tuple[np.ndarray, np.ndarray]:
-    """MLE transition matrix from counts. `reversible` enforces detailed balance
-    by the standard symmetrization C <- (C + C^T)/2 (a simple, robust estimator;
-    swap in a proper reversible MLE for production). Returns (T, stationary pi)."""
+    """Transition matrix from counts. `reversible` enforces detailed balance by the
+    standard symmetrization C <- (C + C^T)/2 -- a simple, robust, *reversible* estimator,
+    but NOT the maximum-likelihood one (it biases the stationary distribution toward
+    uniform when state populations are unequal). Kept as the pure-numpy fallback /
+    entropy-coding model; for REPORTED kinetics use `estimate_reversible_T`, which prefers
+    deeptime's reversible MLE. Returns (T, stationary pi)."""
     C = C.copy()
     if reversible:
         C = 0.5 * (C + C.T)
@@ -467,6 +470,35 @@ def transition_matrix(C: np.ndarray, reversible: bool = True
     T = C / rs
     pi = stationary_distribution(T)
     return T, pi
+
+
+def estimate_reversible_T(C: np.ndarray, prefer: str = "auto"
+                          ) -> Tuple[np.ndarray, str]:
+    """Reversible transition matrix from counts, PREFERRING deeptime's reversible
+    maximum-likelihood estimator (the publishable one) and FALLING BACK to the
+    (C+C^T)/2 symmetrization when deeptime is unavailable or its MLE fails. This is the
+    estimator that backs GLIDE's REPORTED timescales and the path bound.
+
+    Returns (T, estimator_tag). T has the SAME shape as C; any state deeptime drops from
+    the largest connected set becomes an absorbing self-loop (T_ii=1) -- honest, since a
+    state the chain never leaves IS absorbing, and the path bound's support check flags
+    the resulting structural zeros. estimator_tag is 'deeptime-mle' or 'symmetrized-cc'.
+    prefer='cc' forces the symmetrized estimator; 'mle' forces deeptime (raising if
+    unavailable)."""
+    C = np.asarray(C, dtype=np.float64)
+    n = C.shape[0]
+    if prefer in ("auto", "mle"):
+        try:
+            from .kinetics_deeptime import reversible_mle_from_counts
+            T_act, active = reversible_mle_from_counts(C, reversible=True)
+            T = np.eye(n)
+            T[np.ix_(active, active)] = T_act
+            return T, "deeptime-mle"
+        except Exception:
+            if prefer == "mle":
+                raise
+    T, _ = transition_matrix(C, reversible=True)
+    return T, "symmetrized-cc"
 
 
 def largest_connected_set(C: np.ndarray) -> np.ndarray:

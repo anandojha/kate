@@ -13,10 +13,11 @@ The T3 contrast -- the paper's central figure. ONE pipeline:
 Why matched support, not deeptime's per-method largest-connected-set: the path bound
 compares P and Q ENTRYWISE, so every method's transition matrix must live on the SAME
 state indexing. We therefore fix ONE active set (largest connected set of the
-reference counts) and estimate every method's reversible MSM on exactly those states.
-This is the fair-comparison discipline RECIPE T3 asks for (same features, same centers,
-same lag) carried through to the estimator. (The headline single-method kinetics use
-deeptime's reversible MLE via `glide analyze`; here the CONTRAST is the deliverable.)
+reference counts) and estimate every method's reversible MSM (`estimate_reversible_T`)
+on exactly those states -- the reversible MLE (deeptime) when installed, else the
+pure-numpy (C+C^T)/2 fallback, so the contrast still runs with no extra deps. This is
+the fair-comparison discipline RECIPE T3 asks for (same features, same centers, same
+lag) carried through to the estimator.
 
 Expected result (the claim): ensemble-only / coordinate-bounded methods show a large
 TRANSITION term (their implied timescales drift); GLIDE's is ~0 because it retains the
@@ -28,7 +29,7 @@ from __future__ import annotations
 import numpy as np
 
 from .kinetic_codec import (kabsch_align, TICA, discretize, count_matrix,
-                            transition_matrix, largest_connected_set,
+                            estimate_reversible_T, largest_connected_set,
                             implied_timescales)
 from .pathbound import report_kinetic_fidelity
 from . import baselines
@@ -61,7 +62,7 @@ def run_benchmark(coords_runs, methods=("glide", "shuffle", "quantize"), *, lag=
     ref_labels = [_assign(c, centers) for c in CV_ref]
     C_ref = count_matrix(ref_labels, nstates, lag)
     active = largest_connected_set(C_ref)
-    P, _ = transition_matrix(C_ref[np.ix_(active, active)], reversible=True)
+    P, _ = estimate_reversible_T(C_ref[np.ix_(active, active)])   # deeptime MLE if present
     its_ref = implied_timescales(P, lag, 4)
 
     results = []
@@ -81,7 +82,7 @@ def run_benchmark(coords_runs, methods=("glide", "shuffle", "quantize"), *, lag=
                     cv = tica.transform(ra.reshape(ra.shape[0], -1))
                     labels_m.append(_assign(cv, centers))
                 C_m = count_matrix(labels_m, nstates, lag)
-                Q, _ = transition_matrix(C_m[np.ix_(active, active)], reversible=True)
+                Q, _ = estimate_reversible_T(C_m[np.ix_(active, active)])
                 note = "re-estimated from reconstruction"
                 available = True
             except baselines.BaselineUnavailable as e:
