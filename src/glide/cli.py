@@ -48,9 +48,9 @@ def cmd_compress(args):
     from .runner import run_glide, print_report
     from .artifact import save_artifact
     art, report = run_glide(
-        args.top, args.dcd, stride=args.stride, cv=args.cv, cv_dim=args.cv_dim,
-        keep_frac=args.keep_frac, epochs=args.epochs, nstates=args.nstates,
-        lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
+        args.top, args.dcd, stride=args.stride, cv=args.cv, features=args.features,
+        cv_dim=args.cv_dim, keep_frac=args.keep_frac, epochs=args.epochs,
+        nstates=args.nstates, lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
         n_bits=args.n_bits, streaming=args.streaming, chunk=args.chunk,
         entropy=args.entropy, flow_kind=args.flow, predictive_kind=args.predictor)
     print_report(report)
@@ -324,6 +324,10 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--chunk", type=int, default=2000, help="streaming chunk size (frames)")
     # ML opt-ins (defaults = the tested baseline; T6-T8 enable the alternatives)
     c.add_argument("--cv", choices=["tica", "vampnet"], default="tica")
+    c.add_argument("--features", choices=["cartesian", "contacts"], default="cartesian",
+                   help="TICA featurization: 'contacts' = invariant inter-atomic distances "
+                        "(removes spurious rigid-body slow modes; physically preferred for "
+                        "kinetics). Default 'cartesian' keeps the validated baseline.")
     c.add_argument("--flow", choices=["realnvp", "spline"], default="realnvp")
     c.add_argument("--entropy", choices=["gaussian", "temporal", "predictive"],
                    default="gaussian")

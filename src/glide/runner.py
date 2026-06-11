@@ -201,6 +201,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         "implied_timescales_ns": its_ns, "lag": lag, "dt_strided_ns": dt_strided_ns,
         "msm_estimator": msm_estimator,
         "kinetic_bound": kin, "entropy": entropy, "cv": cv_meta["cv"],
+        "features": cv_meta.get("features", "cartesian"),
         "vamp_score": cv_meta.get("vamp_score"),
         "rate_gaussian_bpv": rate_gaussian_bpv, "rate_temporal_bpv": rate_temporal_bpv,
         "rd_curve": rd_curve, "pred_cond_nll": pred_cond_nll,
@@ -215,9 +216,42 @@ def _tica_cvs(aligned, lag, cv_dim, x_mean, verbose):
     if verbose:
         print("  TICA CVs              : %d-D   leading timescales (frames): %s"
               % (cv_dim, np.round(tica.timescales_[:cv_dim], 1)))
-    cv_meta = {"cv": "tica", "tica_mean": tica.mean_, "tica_eigvecs": tica.eigvecs_,
+    cv_meta = {"cv": "tica", "features": "cartesian",
+               "tica_mean": tica.mean_, "tica_eigvecs": tica.eigvecs_,
                "tica_timescales": tica.timescales_, "x_mean": tica.mean_,
                "vamp_score": None}
+    return CV_runs, cv_meta
+
+
+def _contact_cvs(coords_runs, lag, cv_dim, verbose, max_atoms=64, sep=2):
+    """Internal-coordinate (pairwise inter-atomic DISTANCE) featurization -> TICA. Inter-
+    atomic distances are invariant to overall translation and rotation, so this removes
+    the spurious rigid-body 'slow modes' that TICA on aligned Cartesian can fabricate --
+    the physically preferred kinetic featurization (Perez-Hernandez 2013; Scherer 2015).
+    Topology-free: uses a capped, evenly-spaced atom subset and a sequence-separation
+    filter, so it works without residue info (residue/contact-map featurization via the
+    topology is the ideal refinement). Reconstruction is unaffected -- the full-atom T4
+    residual decoder is fit on coordinates, not on the CV featurization."""
+    N = int(np.asarray(coords_runs[0]).shape[1])
+    sub = np.unique(np.linspace(0, N - 1, min(int(max_atoms), N)).astype(int))
+    pr = [(int(i), int(j)) for a, i in enumerate(sub) for j in sub[a + 1:]
+          if abs(int(i) - int(j)) >= int(sep)]
+    pi = np.array([p[0] for p in pr]); pj = np.array([p[1] for p in pr])
+    feats = []
+    for r in coords_runs:
+        X = np.asarray(r, dtype=np.float64)
+        feats.append(np.linalg.norm(X[:, pi, :] - X[:, pj, :], axis=2))   # (T, n_pairs)
+    F = np.concatenate(feats, 0)
+    mu = F.mean(0); sd = F.std(0) + 1e-9
+    feats = [(f - mu) / sd for f in feats]                                 # standardize
+    tica = TICA(lag=lag, n_components=cv_dim).fit(feats)
+    CV_runs = [tica.transform(f) for f in feats]
+    if verbose:
+        print("  contact-TICA CVs      : %d-D from %d pairwise distances  timescales(frames): %s"
+              % (cv_dim, F.shape[1], np.round(tica.timescales_[:cv_dim], 1)))
+    cv_meta = {"cv": "tica", "features": "contacts",
+               "tica_mean": None, "tica_eigvecs": None,
+               "tica_timescales": tica.timescales_, "x_mean": None, "vamp_score": None}
     return CV_runs, cv_meta
 
 
@@ -230,13 +264,16 @@ def _vampnet_cvs(aligned, lag, cv_dim, x_mean, epochs, seed, verbose):
     return CV_runs, cv_meta
 
 
-def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", cv_dim=6,
-                        keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
+def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", features="cartesian",
+                        cv_dim=6, keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
                         dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                         entropy="gaussian", flow_kind="realnvp",
                         predictive_kind="gru") -> Tuple[Artifact, dict]:
     """In-RAM, run-aware flow-based GLIDE on a list of (T_i, N, 3) arrays (nm). ``cv`` is
-    the collective-variable method: 'tica' (linear, default) or 'vampnet' (T6)."""
+    the collective-variable method: 'tica' (linear, default) or 'vampnet' (T6).
+    ``features`` is the TICA featurization: 'cartesian' (aligned coords, default) or
+    'contacts' (rotation/translation-invariant inter-atomic distances -- removes spurious
+    rigid-body slow modes; physically preferred for kinetics). Ignored when cv='vampnet'."""
     ref = None
     aligned = []
     for r in coords_runs:
@@ -246,6 +283,8 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", cv_dim=6,
     x_mean = X_all.mean(axis=0)
     if cv == "vampnet":
         CV_runs, cv_meta = _vampnet_cvs(aligned, lag, cv_dim, x_mean, epochs, seed, verbose)
+    elif features == "contacts":
+        CV_runs, cv_meta = _contact_cvs(coords_runs, lag, cv_dim, verbose)
     else:
         CV_runs, cv_meta = _tica_cvs(aligned, lag, cv_dim, x_mean, verbose)
     return _assemble_artifact(CV_runs, lambda idx: X_all[idx], cv_meta, ref,
@@ -325,18 +364,22 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
                               predictive_kind=predictive_kind)
 
 
-def run_glide(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.10,
-            epochs=300, nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, n_bits=4,
-            seed=0, streaming=False, chunk=2000, entropy="gaussian",
+def run_glide(top: str, dcd: str, *, stride=10, cv="tica", features="cartesian", cv_dim=6,
+            keep_frac=0.10, epochs=300, nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14,
+            n_bits=4, seed=0, streaming=False, chunk=2000, entropy="gaussian",
             flow_kind="realnvp", predictive_kind="gru",
             verbose=True) -> Tuple[Artifact, dict]:
     """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based GLIDE.
-    ``cv`` = 'tica' (default) or 'vampnet' (T6). ``streaming=True`` uses the out-of-core
-    path (chunked md.iterload; TICA only)."""
+    ``cv`` = 'tica' (default) or 'vampnet' (T6). ``features`` = 'cartesian' (default) or
+    'contacts' (invariant internal coordinates -- physically preferred for kinetics).
+    ``streaming=True`` uses the out-of-core path (chunked md.iterload; cartesian TICA)."""
     import mdtraj as md
     if streaming and cv == "vampnet":
         raise SystemExit("--cv vampnet is not supported with --streaming (the VAMPNet "
                          "needs its features in RAM). Use the in-RAM path.")
+    if streaming and features == "contacts":
+        raise SystemExit("--features contacts is not supported with --streaming yet "
+                         "(distance featurization needs the frames in RAM). Use in-RAM.")
     dt_strided_ns = stride * dt_ps / 1000.0
     lag = max(1, int(round(lag_ns / dt_strided_ns)))
     if verbose:
@@ -351,6 +394,8 @@ def run_glide(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0
               lag=lag, stride=stride, dt_ps=dt_ps, lat_bits=lat_bits, n_bits=n_bits,
               seed=seed, verbose=verbose, entropy=entropy, flow_kind=flow_kind,
               predictive_kind=predictive_kind)
+    if not streaming:
+        kw["features"] = features            # contacts featurization is in-RAM only
     if streaming:
         def factory():
             return (np.asarray(ch.xyz, dtype=np.float64) for ch in
@@ -371,8 +416,11 @@ def print_report(report: dict) -> None:
     print("-" * 70)
     if r.get("vamp_score") is not None:
         print("COLLECTIVE VARIABLES  : VAMPnet (T6), VAMP2 score = %.3f" % r["vamp_score"])
+    elif r.get("features") == "contacts":
+        print("COLLECTIVE VARIABLES  : TICA on internal-coordinate contacts "
+              "(rotation/translation-invariant)")
     else:
-        print("COLLECTIVE VARIABLES  : TICA (linear)")
+        print("COLLECTIVE VARIABLES  : TICA (linear, aligned Cartesian)")
     print("ENSEMBLE FIDELITY (flow vs data)")
     print("  KL(data||flow) on CV1 : %.4f nats" % r["kl_cv1_nats"])
     print("  bounded-obs |diff|    : %.4f   <= Pinsker sqrt(KL/2)=%.4f : %s"
