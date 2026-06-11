@@ -1,6 +1,7 @@
-# EPC — Methods and Results
+# GLIDE — Methods and Results
 
-*Ensemble-Preserving Compression of molecular-dynamics trajectories, with a
+*GLIDE — **G**enerative **L**atent **I**nvertible **D**ynamics‑preserving **E**ncoder:
+kinetics-preserving compression of molecular-dynamics trajectories, with a
 kinetic (path-distribution) fidelity bound. This document consolidates the method
 and the measurements made on the NTL9 fast-folder. Every quantitative claim here is
 empirical and is reported with its limitations; nothing is assumed.*
@@ -15,7 +16,7 @@ what scientists actually want preserved is not the raw coordinates — it is the
 populations) and, harder, the **kinetics** (the slow timescales, the transition
 rates between metastable states).
 
-The central observation driving EPC:
+The central observation driving GLIDE:
 
 > **Preserving the ensemble does not preserve the kinetics.** A compressor can
 > reproduce every equilibrium average and still destroy the slow dynamics — and a
@@ -23,7 +24,7 @@ The central observation driving EPC:
 > tight tolerance and still collapse the implied timescales, because the slow modes
 > live in a low-variance subspace that uniform error bounds do not protect.
 
-EPC's contribution is a compressor built around an **observable-space bound** — a
+GLIDE's contribution is a compressor built around an **observable-space bound** — a
 KL/Pinsker guarantee in the space of the *path distribution*, which is what covers
 the kinetics. The bound is the organizing principle; the neural-network pieces are
 motivated components, not the headline.
@@ -49,7 +50,7 @@ KL_path(P || Q)  =  KL_ensemble(π_P || π_Q)        (the static / ensemble term
   ensemble term to zero while leaving this one large.
 
 By Pinsker's inequality, each KL term bounds the total-variation distance of the
-corresponding observables, giving certifiable error bars. `epc bound` reports both
+corresponding observables, giving certifiable error bars. `glide bound` reports both
 terms and labels which observable each covers. **Honesty:** the static Pinsker bound
 does **not** cover kinetics; only the path-distribution (transition) term does.
 
@@ -61,10 +62,10 @@ does **not** cover kinetics; only the path-distribution (transition) term does.
 trajectory ─► align (Kabsch, protein-only) ─► collective variables (TICA / VAMPnet)
            ─► normalizing flow (RealNVP / spline)  ─► information-gain frame selection
            ─► entropy coding (Gaussian / temporal / predictive)
-           ─► retained MSM  ──────────────────────────────► the .epc artifact
+           ─► retained MSM  ──────────────────────────────► the .glide artifact
 ```
 
-The compressed object **is the analysis substrate**: the `.epc` artifact stores the
+The compressed object **is the analysis substrate**: the `.glide` artifact stores the
 run-aware all-frame discrete trajectory (`dtraj`) + k-means centers + the flow, so
 `analyze` / `bound` / `benchmark` re-estimate the MSM at **any** lag without the
 original trajectory ("the file is the kinetic model"). The pure-numpy `bound` path
@@ -100,7 +101,7 @@ flows, and context-model entropy coding are cited prior art.
 
 Before comparing compressors on a trajectory you must know **what that trajectory can
 validate**. A compressor cannot "preserve" a kinetic observable the source never
-sampled. `epc analyze --resolution` reports, per dynamical process: the Bayesian
+sampled. `glide analyze --resolution` reports, per dynamical process: the Bayesian
 timescale, its 95 % confidence interval, the relative uncertainty, and the number of
 **independent events** the trajectory contains (≈ T_total / t_i). A process is flagged
 *resolved* only if its Bayesian error is small **and** it has enough events.
@@ -119,7 +120,7 @@ System: NTL9 fast-folder, 39 residues, 25 µs at 10 ps. Featurization: CA–CA d
 (|i−j| ≥ 3) → TICA slow CVs. Kinetics: deeptime reversible-MLE MSM on a common k-means
 discretization; error = mean relative error of the resolved-band implied timescales.
 
-### 6.1 The contrast — EPC vs SZ3/ZFP (`ntl9_contrast_resolved.png`)
+### 6.1 The contrast — GLIDE vs SZ3/ZFP (`ntl9_contrast_resolved.png`)
 
 Real SZ3 and ZFP 1.0.1 binaries, fixed-accuracy mode, swept over the error bound;
 each reconstruction re-featurized, re-projected on the **same** TICA, discretized on
@@ -127,28 +128,28 @@ the **same** centers, then scored on the resolved band.
 
 | to keep resolved kinetics < 1 % error | rate needed |
 |---|---|
-| **EPC** (slow CVs + kinetic model) | **~12 bits/frame** |
+| **GLIDE** (slow CVs + kinetic model) | **~12 bits/frame** |
 | SZ3 (all-atom, error-bounded) | ~840 bits/frame |
 | ZFP (all-atom, error-bounded) | ~1400 bits/frame |
 
 A **~70–120× rate gap**. Pushed to aggressive compression the general compressors
 **collapse the kinetics**: SZ3 reaches 95 % timescale error at 331 bits/frame. They
 spend bits on bounded *all-atom* error, blind to which coordinate combinations carry
-the slow dynamics; EPC's bound targets the kinetics directly.
+the slow dynamics; GLIDE's bound targets the kinetics directly.
 
-**Honest caveat:** EPC and SZ3/ZFP optimize different things — SZ3/ZFP give bounded
-all-atom reconstruction, EPC gives the kinetic model (slow CVs + MSM; all-atom
+**Honest caveat:** GLIDE and SZ3/ZFP optimize different things — SZ3/ZFP give bounded
+all-atom reconstruction, GLIDE gives the kinetic model (slow CVs + MSM; all-atom
 reconstruction would add the T4 residual bits). The apples-to-apples axis is *rate
 needed for a given kinetic fidelity*, which is what the figure plots.
 
 ### 6.2 The T9 gate — predictive entropy coding (`ntl9_temporal_redundancy.png`, `ntl9_t9_gate.png`)
 
-**Rate half.** EPC compresses *slow* CVs, whose µs timescales keep them strongly
+**Rate half.** GLIDE compresses *slow* CVs, whose µs timescales keep them strongly
 autocorrelated (ρ ≈ 0.98) even at the 0.5 ns storage stride. At equal distortion,
 predictive coding saves **~15 bits/frame (~43 %)** over static per-frame coding (35 →
 20 bits/frame, 8 CVs); ~14 bits even at 1 ns. This *corrects an earlier conservative
 hedge* ("gain may be modest, frames decorrelated at ~100 ps") — true for fast
-Cartesian modes, false for the slow CVs EPC actually stores.
+Cartesian modes, false for the slow CVs GLIDE actually stores.
 
 **Observable-error half.** With proper closed-loop DPCM reconstruction, scored on the
 resolved band, the predictive rate-vs-kinetics-error frontier sits far left of static:
@@ -206,10 +207,10 @@ pip install -e ".[kinetics,test]"
 python -m pytest -q                                   # 118 tests, torch/deeptime auto-skip
 python examples/demo_pathbound.py                     # the kinetic bound (pure numpy)
 python examples/demo_bound_loss.py                    # T10 mechanism (synthetic)
-epc analyze ART --resolution                          # kinetic-resolution report
-epc benchmark TOP DCD --methods epc,sz3,zfp           # the contrast (needs SZ3/ZFP binaries)
+glide analyze ART --resolution                          # kinetic-resolution report
+glide benchmark TOP DCD --methods glide,sz3,zfp           # the contrast (needs SZ3/ZFP binaries)
 ```
 
 The NTL9 measurement scripts (figures in `docs/`) require the 25 µs trajectory, which
 is not in the repo; the synthetic mechanism demos and the full test suite run anywhere.
-Baseline binaries are located via `EPC_SZ3_BIN` / `EPC_ZFP_BIN` / `EPC_MDZIP_DIR`.
+Baseline binaries are located via `GLIDE_SZ3_BIN` / `GLIDE_ZFP_BIN` / `GLIDE_MDZIP_DIR`.

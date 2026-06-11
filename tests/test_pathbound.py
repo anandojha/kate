@@ -6,7 +6,7 @@ NOT preserve kinetics, and the transition term is what exposes the gap.
 import numpy as np
 import pytest
 
-from epc import pathbound as pb
+from glide import pathbound as pb
 
 
 def reversible_chain(mu, s_off):
@@ -69,7 +69,7 @@ def test_ensemble_preserved_kinetics_not():
 
 
 def test_retained_msm_keeps_both_terms_small():
-    """Q_good ~ EPC's retained MSM: both terms near zero (kinetics preserved)."""
+    """Q_good ~ GLIDE's retained MSM: both terms near zero (kinetics preserved)."""
     P = reversible_chain(MU, S)
     rng = np.random.default_rng(0)
     Q_good = P + 1e-3 * rng.random(P.shape)

@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "epc: Ensemble-Preserving Compression of MD trajectories with a kinetic bound"
+title: "GLIDE: Generative Latent Invertible Dynamics-preserving Encoder — kinetics-preserving compression of MD trajectories"
 abstract: >-
   An analysis-native compressor for molecular-dynamics trajectories that unifies a
   normalizing-flow density, a Markov-state dynamics model, and entropy coding under one
@@ -20,5 +20,5 @@ keywords:
   - normalizing flow
   - kinetics
   - Pinsker bound
-repository-code: "https://github.com/anandojha/epc"
-url: "https://github.com/anandojha/epc"
+repository-code: "https://github.com/anandojha/glide"
+url: "https://github.com/anandojha/glide"

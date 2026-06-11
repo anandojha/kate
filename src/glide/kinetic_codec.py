@@ -12,7 +12,7 @@ A trajectory becomes three things in one file:
   1. A linear "slow-mode" transform (TICA for kinetics; full-rank whitening for
      reconstruction). The whitening is an exactly-invertible *linear normalizing
      flow* to a Gaussian reference, so a KL bound survives it (Gaussian-reference
-     version of the EPC guarantee). Swap in a Boltzmann-generator-style flow via
+     version of the GLIDE guarantee). Swap in a Boltzmann-generator-style flow via
      the `Transform` interface to remove the Gaussian assumption.
 
   2. A discrete microstate sequence + its MSM transition matrix. The MSM is the
@@ -292,7 +292,7 @@ class Transform:
 class WhiteningTransform(Transform):
     """Full-rank PCA/Mahalanobis whitening: exactly invertible linear map to a
     standardized Gaussian reference. This is a linear normalizing flow; the KL
-    bound is preserved under it (Gaussian-reference EPC). For large 3N keep it
+    bound is preserved under it (Gaussian-reference GLIDE). For large 3N keep it
     low-rank (set `rank`), but then reconstruction is lossy beyond quantization."""
     rank: Optional[int] = None
     mean_: np.ndarray = field(default=None, repr=False)
@@ -347,7 +347,7 @@ class TICA:
         # largest-magnitude component of each mode positive. This makes the CVs --
         # and therefore the seeded flow / IGFS selection -- DETERMINISTIC and identical
         # between the batch fit() and the streaming finalize() (whose covariances differ
-        # only by float roundoff), so streaming EPC reproduces the in-RAM result.
+        # only by float roundoff), so streaming GLIDE reproduces the in-RAM result.
         cols = np.arange(evecs.shape[1])
         signs = np.sign(evecs[np.argmax(np.abs(evecs), axis=0), cols])
         signs[signs == 0] = 1.0

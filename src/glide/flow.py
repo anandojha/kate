@@ -1,8 +1,8 @@
 """
-epc_flow.py
+glide_flow.py
 ===========
 A normalizing flow (RealNVP) built from scratch in PyTorch -- the learned density
-model at the heart of EPC. This is the piece the linear PCA-whitening was standing
+model at the heart of GLIDE. This is the piece the linear PCA-whitening was standing
 in for.
 
 Why a flow, precisely (this is the abstract's logic):

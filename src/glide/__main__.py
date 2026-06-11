@@ -1,4 +1,4 @@
-"""``python -m epc`` -> the CLI."""
+"""``python -m glide`` -> the CLI."""
 import sys
 
 from .cli import main

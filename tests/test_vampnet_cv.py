@@ -7,8 +7,8 @@ import pytest
 pytest.importorskip("deeptime")
 pytest.importorskip("torch")
 
-from epc.kinetic_codec import kabsch_align, TICA
-from epc import vampnet_cv as vc
+from glide.kinetic_codec import kabsch_align, TICA
+from glide import vampnet_cv as vc
 from _synth import metastable_coords
 
 
@@ -35,9 +35,9 @@ def test_vampnet_and_tica_scores_both_finite():
 
 
 def test_compress_cv_vampnet_end_to_end(tmp_path):
-    from epc.runner import compress_trajectory
-    from epc.artifact import save_artifact
-    from epc.cli import main
+    from glide.runner import compress_trajectory
+    from glide.artifact import save_artifact
+    from glide.cli import main
     coords = metastable_coords(n_steps=2000, n_atoms=6, seed=0)
     art, rep = compress_trajectory([coords], cv="vampnet", cv_dim=2, keep_frac=0.1,
                                    epochs=40, nstates=30, lag=10, seed=0, verbose=False)
@@ -45,7 +45,7 @@ def test_compress_cv_vampnet_end_to_end(tmp_path):
     assert rep["vamp_score"] is not None and np.isfinite(rep["vamp_score"])
     # full-atom reconstruction works with VAMPnet CVs (the decoder is CV-agnostic)
     assert rep["fullatom_rmsd"] < 0.1
-    p = str(tmp_path / "v.epc")
+    p = str(tmp_path / "v.glide")
     save_artifact(art, p)
     out = str(tmp_path / "full.npy")
     main(["decompress", p, "-o", out, "--full-atom"])

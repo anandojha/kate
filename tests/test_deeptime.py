@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 pytest.importorskip("deeptime")
-from epc import kinetics_deeptime as kd  # noqa: E402
+from glide import kinetics_deeptime as kd  # noqa: E402
 
 
 def _two_state_run(n, seed, a=0.01):

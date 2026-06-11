@@ -9,7 +9,7 @@ import sys
 import numpy as np
 import pytest
 
-from epc import inspect_traj as it
+from glide import inspect_traj as it
 from _synth import metastable_coords
 
 
@@ -56,7 +56,7 @@ def test_inspect_traj_main_with_compress(tmp_path):
     sys.argv = ["inspect_traj", pdb, dcd, "--compress", "--stride", "1",
                 "--lag", "10", "--nbits", "4", "--nstates", "20"]
     try:
-        runpy.run_module("epc.inspect_traj", run_name="__main__")
+        runpy.run_module("glide.inspect_traj", run_name="__main__")
     except SystemExit:
         pass
     finally:
@@ -65,7 +65,7 @@ def test_inspect_traj_main_with_compress(tmp_path):
 
 def test_compress_verbose_temporal_and_predictive(capsys):
     pytest.importorskip("torch")
-    from epc.runner import compress_trajectory
+    from glide.runner import compress_trajectory
     coords = metastable_coords(1000, 6, seed=0)
     compress_trajectory([coords], cv_dim=2, keep_frac=0.1, epochs=10, nstates=20,
                         lag=10, seed=0, verbose=True, entropy="temporal")
@@ -76,7 +76,7 @@ def test_compress_verbose_temporal_and_predictive(capsys):
 
 
 def test_decode_markov_robust_to_overread():
-    from epc.kinetic_codec import encode_markov, decode_markov
+    from glide.kinetic_codec import encode_markov, decode_markov
     T = np.array([[0.5, 0.5], [0.5, 0.5]])
     pi = np.array([0.5, 0.5])
     states = np.array([0, 1, 0, 1, 0])

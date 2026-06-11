@@ -10,7 +10,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from epc.predictive_coder import (CausalGRUPredictor, CausalTCNPredictor,
+from glide.predictive_coder import (CausalGRUPredictor, CausalTCNPredictor,
                                   encode_predictive, decode_predictive,
                                   rate_distortion_curve, conditional_nll,
                                   static_gaussian_nll)
@@ -53,7 +53,7 @@ def test_rate_distortion_is_monotonic():
 
 
 def test_predictive_dominates_static_lossless_at_matched_distortion():
-    from epc.temporal_prior import (gaussian_rate_bits_per_value, quantize, dequantize)
+    from glide.temporal_prior import (gaussian_rate_bits_per_value, quantize, dequantize)
     z = _ar1(rho=0.97, seed=4)
     m = CausalGRUPredictor(2, hidden=32).fit(z, epochs=140, seed=0)
     L, zmax = 1 << 12, 6.0
@@ -76,8 +76,8 @@ def test_tcn_predictor_roundtrip():
 
 
 def test_compress_entropy_predictive_end_to_end(tmp_path):
-    from epc.runner import compress_trajectory
-    from epc.artifact import save_artifact, load_artifact
+    from glide.runner import compress_trajectory
+    from glide.artifact import save_artifact, load_artifact
     from _synth import metastable_coords
     coords = metastable_coords(n_steps=1500, n_atoms=6, seed=0)
     art, rep = compress_trajectory([coords], cv_dim=2, keep_frac=0.1, epochs=40,
@@ -87,7 +87,7 @@ def test_compress_entropy_predictive_end_to_end(tmp_path):
     assert art.entropy == "predictive" and art.predictive_state is not None
     assert rep["rd_curve"] is not None and len(rep["rd_curve"]) >= 3
     assert rep["pred_cond_nll"] is not None and rep["pred_static_nll"] is not None
-    p = str(tmp_path / "p.epc")
+    p = str(tmp_path / "p.glide")
     save_artifact(art, p)
     loaded = load_artifact(p, with_flow=True)
     assert loaded.entropy == "predictive"

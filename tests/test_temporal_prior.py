@@ -7,7 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from epc.temporal_prior import (TemporalPrior, encode_sequence, decode_sequence,
+from glide.temporal_prior import (TemporalPrior, encode_sequence, decode_sequence,
                                 quantize, gaussian_rate_bits_per_value,
                                 temporal_rate_bits_per_value)
 from _synth import metastable_coords
@@ -66,8 +66,8 @@ def test_no_gain_claimed_on_iid_sequence():
 
 
 def test_compress_entropy_temporal_end_to_end(tmp_path):
-    from epc.runner import compress_trajectory
-    from epc.artifact import save_artifact, load_artifact
+    from glide.runner import compress_trajectory
+    from glide.artifact import save_artifact, load_artifact
     coords = metastable_coords(n_steps=1500, n_atoms=6, seed=0)
     art, rep = compress_trajectory([coords], cv_dim=2, keep_frac=0.1, epochs=40,
                                    nstates=30, lag=10, entropy="temporal", verbose=False)
@@ -75,7 +75,7 @@ def test_compress_entropy_temporal_end_to_end(tmp_path):
     assert rep["rate_gaussian_bpv"] is not None
     assert rep["rate_temporal_bpv"] is not None
     assert art.entropy == "temporal" and art.temporal_state is not None
-    p = str(tmp_path / "t.epc")
+    p = str(tmp_path / "t.glide")
     save_artifact(art, p)
     loaded = load_artifact(p, with_flow=True)
     assert loaded.entropy == "temporal"

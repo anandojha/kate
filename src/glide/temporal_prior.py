@@ -250,7 +250,7 @@ def decode_sequence(data: bytes, T: int, dim: int, model: TemporalPrior,
 # ============================================================================
 def gaussian_rate_bits_per_value(z, L, zmax):
     """Bits/value coding the SAME quantized levels against the fixed N(0,I) base
-    (the i.i.d. baseline -- what EPC's coder does today)."""
+    (the i.i.d. baseline -- what GLIDE's coder does today)."""
     from .codec import gaussian_cumfreq, encode_iid
     levels = quantize(np.asarray(z), L, zmax).ravel()
     coded = encode_iid(levels, gaussian_cumfreq(L, zmax))

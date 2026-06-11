@@ -3,7 +3,7 @@ inspect() + --compress paths driven by the tiny synthetic DCD fixture."""
 import numpy as np
 import pytest
 
-from epc import inspect_traj as it
+from glide import inspect_traj as it
 from _synth import write_tiny_dcd
 
 

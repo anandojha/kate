@@ -1,26 +1,28 @@
-# epc — Ensemble-Preserving Compression of MD trajectories, with a kinetic bound
+# glide — kinetics-preserving compression of MD trajectories
 
-[![CI](https://github.com/anandojha/epc/actions/workflows/ci.yml/badge.svg)](https://github.com/anandojha/epc/actions/workflows/ci.yml)
+**GLIDE** = **G**enerative **L**atent **I**nvertible **D**ynamics‑preserving **E**ncoder — a normalizing‑flow codec whose fidelity bound covers the *kinetics*, not just the ensemble.
+
+[![CI](https://github.com/anandojha/glide/actions/workflows/ci.yml/badge.svg)](https://github.com/anandojha/glide/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![coverage 99%](https://img.shields.io/badge/coverage-99%25-brightgreen.svg)](#tests)
 
 > **Thesis.** Ensemble-preserving compression does **not** preserve kinetics. Two
 > ensembles with identical stationary distributions can have arbitrarily different
-> rates. EPC adds a **path-distribution (trajectory) bound** —
+> rates. GLIDE adds a **path-distribution (trajectory) bound** —
 > `KL(path) = ensemble term + transition term` — so that **kinetic** observables
 > (timescales, MFPTs, k_on/k_off) are covered, not just static ones. The kinetic
 > bound is the headline, **not** the architecture.
 
 This repo packages a tested research codebase as an installable library + CLI: a
 classical analysis-native codec, a from-scratch RealNVP normalizing flow, the
-flow-based EPC codec, the **kinetic path bound** (the novel piece), and a
+flow-based GLIDE codec, the **kinetic path bound** (the novel piece), and a
 [deeptime](https://github.com/deeptime-ml/deeptime) MSM wrapper. `RELATED_WORK.txt`
 lists the prior work and baselines this builds on and differentiates against.
 
 ```bash
-pip install git+https://github.com/anandojha/epc.git          # core
-pip install "epc[kinetics] @ git+https://github.com/anandojha/epc.git"  # + deeptime
+pip install git+https://github.com/anandojha/glide.git          # core
+pip install "glide[kinetics] @ git+https://github.com/anandojha/glide.git"  # + deeptime
 ```
 
 ## What is honestly new
@@ -42,15 +44,15 @@ MSM-as-entropy-coder, and flow-as-density (Boltzmann Generators) are all prior a
 > resolution accounting, and every measured result with its limitations.
 
 Validated on the 25 µs NTL9 fast-folder, scored **only on the kinetically resolved band**
-(`epc analyze --resolution`; the slow folding mode is sampling-limited and is *not* scored
+(`glide analyze --resolution`; the slow folding mode is sampling-limited and is *not* scored
 — see honesty constraints). All numbers are empirical, with the limits stated.
 
 - **The contrast** ([`docs/ntl9_contrast_resolved.png`](docs/ntl9_contrast_resolved.png)) —
-  to preserve the resolved kinetics to <1 % timescale error, **EPC needs ~12 bits/frame;
+  to preserve the resolved kinetics to <1 % timescale error, **GLIDE needs ~12 bits/frame;
   general-purpose error-bounded compressors need ~840 (SZ3) – 1400 (ZFP)** — a **~70–120×**
   rate gap — and when pushed to aggressive compression **SZ3/ZFP collapse the kinetics**
   (SZ3 → 95 % timescale error at 331 bits/frame). They spend bits on bounded *all-atom*
-  error, blind to which coordinates carry the slow dynamics; EPC's bound targets the
+  error, blind to which coordinates carry the slow dynamics; GLIDE's bound targets the
   kinetics. (Different objectives — the honest axis is *rate needed for a given kinetic
   fidelity*, which is what is plotted.)
 - **Predictive (T9) entropy coding** ([`docs/ntl9_temporal_redundancy.png`](docs/ntl9_temporal_redundancy.png),
@@ -71,7 +73,7 @@ Validated on the 25 µs NTL9 fast-folder, scored **only on the kinetically resol
   coordinates/QoI already. The genuine novelty is the **observable-space (KL/Pinsker)
   bound, specifically the kinetic (path) bound.**
 - The **ensemble (static)** Pinsker bound does **not** cover kinetic observables.
-  **Only the path-distribution bound** (`epc.pathbound`) does. The `bound` report
+  **Only the path-distribution bound** (`glide.pathbound`) does. The `bound` report
   labels which term covers what.
 - **"Exact / invertible" is qualified:** the flow is an exact diffeomorphism and kept
   frames reconstruct exactly up to quantization, **but information-gain frame
@@ -112,9 +114,9 @@ pip install -e ".[test]"      # pytest
 ```
 
 `torch` is a **core** dependency (the flow needs it). `deeptime` is an **optional
-`[kinetics]` extra**: `epc compress` / `decompress` / `bound` run without it; only
+`[kinetics]` extra**: `glide compress` / `decompress` / `bound` run without it; only
 `analyze` / `benchmark` / the VAMPnet CV path import it (and raise a clear
-`pip install epc[kinetics]` if absent). Importing `epc` pulls in **neither** torch
+`pip install glide[kinetics]` if absent). Importing `glide` pulls in **neither** torch
 nor deeptime eagerly — enforced by `tests/test_no_eager_torch.py`.
 
 > **macOS note.** Use a *fully isolated* venv (as above). A `--system-site-packages`
@@ -125,11 +127,11 @@ nor deeptime eagerly — enforced by `tests/test_no_eager_torch.py`.
 ## The target: one end-to-end tool
 
 ```
-epc compress   TOP DCD  -> artifact    align -> CV/flow -> IGFS -> entropy code + retained MSM
-epc decompress artifact -> trajectory  flow inverse for kept frames; full-atom residual stage
-epc analyze    artifact -> kinetics    deeptime MSM: timescales, lag scan, Bayesian bars, --resolution
-epc bound      artifact ref -> report  ensemble term, transition term, Pinsker pair/path bounds
-epc benchmark  TOP DCD  -> table+plot  EPC vs MDZip vs SZ3 vs ZFP, each scored by the path bound
+glide compress   TOP DCD  -> artifact    align -> CV/flow -> IGFS -> entropy code + retained MSM
+glide decompress artifact -> trajectory  flow inverse for kept frames; full-atom residual stage
+glide analyze    artifact -> kinetics    deeptime MSM: timescales, lag scan, Bayesian bars, --resolution
+glide bound      artifact ref -> report  ensemble term, transition term, Pinsker pair/path bounds
+glide benchmark  TOP DCD  -> table+plot  GLIDE vs MDZip vs SZ3 vs ZFP, each scored by the path bound
 ```
 
 Module map: `compress = runner.py/codec.py`, `decompress = codec.py (+T4 residual)`,
@@ -137,7 +139,7 @@ Module map: `compress = runner.py/codec.py`, `decompress = codec.py (+T4 residua
 The artifact stores the run-aware **all-frame dtraj + k-means centers** (not just one
 count matrix), so `analyze`/`benchmark` can re-estimate the MSM at **any** lag.
 
-`epc analyze --resolution` adds a **kinetic-resolution report**: per dynamical process,
+`glide analyze --resolution` adds a **kinetic-resolution report**: per dynamical process,
 the Bayesian timescale, its 95% confidence interval, the relative uncertainty, and the
 number of *independent events* the trajectory contains (~ T_total / t_i). A process is
 flagged *resolved* only if its Bayesian error is small **and** it has enough events —
@@ -152,11 +154,11 @@ MD-compression literature.
 
 | original script           | here (packaged)                       | checks |
 |---------------------------|---------------------------------------|--------|
-| `python epc_flow.py`      | `python -m epc.flow`                  | invertibility ~1e-6, density ~1, wells recovered |
+| `python glide_flow.py`      | `python -m glide.flow`                  | invertibility ~1e-6, density ~1, wells recovered |
 | `python demo_pathbound.py`| `python examples/demo_pathbound.py`   | ensemble term ~0 for both chains; transition term large for the ensemble-only chain |
 | `python demo_kinetic_codec.py` | `python examples/demo_kinetic_codec.py` | range coder hits the MSM entropy-rate floor; kinetics recovered |
-| `python kinetics_deeptime.py` | `python -m epc.kinetics_deeptime`  | reversible MLE MSM, lag scan, Bayesian error bars (needs `[kinetics]`) |
-| `python demo_epc.py`      | `python examples/demo_epc.py`         | full flow-based pipeline + measured bound |
+| `python kinetics_deeptime.py` | `python -m glide.kinetics_deeptime`  | reversible MLE MSM, lag scan, Bayesian error bars (needs `[kinetics]`) |
+| `python demo_glide.py`      | `python examples/demo_glide.py`         | full flow-based pipeline + measured bound |
 
 Run the test suite with `pytest` (torch/deeptime-dependent tests auto-skip if those
 libraries are absent).
@@ -170,16 +172,16 @@ synthetic demo's slow timescales are under-resolved (the leading TICA mode on ra
 Cartesian is spurious). This is expected and is exactly why we make deeptime
 the published path: implied timescales are a **lower bound that converges upward with
 lag** (Prinz et al.), so the rigorous kinetics come from a **deeptime reversible-MLE
-MSM + lag scan** (`epc analyze`, version-stable) and, for nonlinear slow CVs, from
+MSM + lag scan** (`glide analyze`, version-stable) and, for nonlinear slow CVs, from
 **VAMPnets [T6]** on **ligand-pocket contacts** (not raw Cartesian). The bound, the
-flow, the EPC pipeline, and the thermodynamics (state populations) are unaffected.
+flow, the GLIDE pipeline, and the thermodynamics (state populations) are unaffected.
 
 ## Build targets (all implemented)
 
 Classical / scaling track:
-- **T1 ✓** path bound wired into the runner + `epc bound` (pure-numpy contrast scorer)
-- **T2 ✓** production kinetics via deeptime (`epc analyze`: lag scan, Bayesian bars)
-- **T3 ✓** baseline-comparison harness (`epc benchmark`, the contrast figure)
+- **T1 ✓** path bound wired into the runner + `glide bound` (pure-numpy contrast scorer)
+- **T2 ✓** production kinetics via deeptime (`glide analyze`: lag scan, Bayesian bars)
+- **T3 ✓** baseline-comparison harness (`glide benchmark`, the contrast figure)
 - **T4 ✓** full-atom reconstruction (`decompress --full-atom`, per-state dithered residual)
 - **T5 ✓** scale to 419k→1M frames (`compress --streaming`, streaming TICA, multi-pass)
 
@@ -204,7 +206,7 @@ invertible and the bound intact; **no lossy CNN autoencoder**):
   static per-frame coding at the 0.5 ns storage stride (35→20 bits/frame, 8 CVs), and
   still ~14 bits at 1 ns. This *corrects an earlier conservative hedge* ("gain may be
   modest, frames are decorrelated at ~100 ps"): that holds for fast Cartesian modes, but
-  EPC compresses **slow** CVs, whose µs timescales keep them strongly autocorrelated
+  GLIDE compresses **slow** CVs, whose µs timescales keep them strongly autocorrelated
   (ρ≈0.98) even at storage spacing — so the temporal-redundancy the predictor exploits is
   large and real.
   **Observable-error half** ([`docs/ntl9_t9_gate.png`](docs/ntl9_t9_gate.png)): scored on
@@ -223,7 +225,7 @@ invertible and the bound intact; **no lossy CNN autoencoder**):
   autoregressive context models — Ballé et al., ICLR 2018 (arXiv:1802.01436); Minnen
   et al., NeurIPS 2018 (arXiv:1809.02736).
 - **T10 ✓ (mechanism shown on synthetic)** the kinetic path-bound made
-  **differentiable so it can be a training loss** (`epc.bound_loss`): a VAMPnet-style
+  **differentiable so it can be a training loss** (`glide.bound_loss`): a VAMPnet-style
   *soft* state assignment makes the soft MSM — and the path-bound transition term
   `h(P‖Q)` — a smooth function of the network, so `loss = rate + λ·h(P‖Q)` trains a
   compressor to spend bits where they matter for *kinetics*, not for coordinate error.
@@ -255,12 +257,12 @@ those libraries are absent.
 ## Repository layout
 
 ```
-src/epc/        flow.py codec.py kinetic_codec.py pathbound.py kinetics_deeptime.py
+src/glide/        flow.py codec.py kinetic_codec.py pathbound.py kinetics_deeptime.py
                 inspect_traj.py runner.py  (+ artifact.py cli.py __main__.py
                 benchmark.py baselines.py temporal_prior.py vampnet_cv.py spline_flow.py
                 predictive_coder.py bound_loss.py)
 tests/          pytest suite (torch/deeptime tests use importorskip)
-examples/       demo_pathbound.py demo_kinetic_codec.py demo_epc.py demo_bound_loss.py
+examples/       demo_pathbound.py demo_kinetic_codec.py demo_glide.py demo_bound_loss.py
                 (the §2 checks)
 RELATED_WORK.txt  prior work + baselines this builds on and differentiates against
 ```
@@ -276,13 +278,13 @@ MDZip / SZ3 / ZFP build and run in their own environments and are invoked as
 trypsin–benzamidine trajectory (`~419,213` frames, 100 ps/frame, solvent-stripped,
 nm) lives on the cluster, not in this repo.
 
-Point the wrappers (`epc.baselines`) at the tools via environment variables:
+Point the wrappers (`glide.baselines`) at the tools via environment variables:
 
 | env var | points to |
 |---|---|
-| `EPC_SZ3_BIN` | the SZ3 compressor executable (e.g. `.../SZ3/build/tools/sz3/sz3`) |
-| `EPC_ZFP_BIN` | the ZFP compressor executable (e.g. `.../zfp/build/bin/zfp`) |
-| `EPC_MDZIP_DIR` | the MDZip repo directory (its own torch/lightning env) |
+| `GLIDE_SZ3_BIN` | the SZ3 compressor executable (e.g. `.../SZ3/build/tools/sz3/sz3`) |
+| `GLIDE_ZFP_BIN` | the ZFP compressor executable (e.g. `.../zfp/build/bin/zfp`) |
+| `GLIDE_MDZIP_DIR` | the MDZip repo directory (its own torch/lightning env) |
 
 If unset (or the tool isn't on `PATH`), the wrapper raises a clear
 `BaselineUnavailable` and the method is skipped — use the local pseudo-baselines

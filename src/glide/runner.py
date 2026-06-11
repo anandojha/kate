@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-runner.py -- flow-based EPC on real (or array) trajectories, and the backend for
-``epc compress``. Reduces to a few TICA collective variables FIRST and trains the
+runner.py -- flow-based GLIDE on real (or array) trajectories, and the backend for
+``glide compress``. Reduces to a few TICA collective variables FIRST and trains the
 flow on those (the abstract's stage-1 ordering), tractable at 3N ~ 5000.
 
 Three entry points share one post-CV core (``_assemble_artifact``):
@@ -11,9 +11,9 @@ Three entry points share one post-CV core (``_assemble_artifact``):
     CVs and the sparse kept frames are). Multi-pass: (1) fit streaming TICA, (2)
     transform -> CVs + train flow + IGFS + MSM, (3) read only the KEPT frames for the
     residual. Streaming TICA == batch TICA exactly (cross-chunk lagged pairs kept).
-  * run_epc(top, dcd[, streaming=True])  -- the DCD loader for both.
+  * run_glide(top, dcd[, streaming=True])  -- the DCD loader for both.
 
-The path bound is wired in (T1): for EPC the retained MSM Q == the full-data reference
+The path bound is wired in (T1): for GLIDE the retained MSM Q == the full-data reference
 P, so the transition term is ~0 by construction. The full-atom residual stage (T4)
 recovers the fast modes TICA discards.
 """
@@ -107,7 +107,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     Tm_act, _ = transition_matrix(C[np.ix_(act, act)], reversible=True)
     its = implied_timescales(Tm_act, lag, 5)
     its_ns = its * dt_strided_ns
-    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # EPC: Q==P
+    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # GLIDE: Q==P
 
     # --- T4: full-atom residual stage (CV-AGNOSTIC linear decoder + dithered residual) ---
     # A linear CV->coordinate decoder fit on the KEPT frames maps the decoded CV back to
@@ -231,7 +231,7 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", cv_dim=6,
                         dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                         entropy="gaussian", flow_kind="realnvp",
                         predictive_kind="gru") -> Tuple[Artifact, dict]:
-    """In-RAM, run-aware flow-based EPC on a list of (T_i, N, 3) arrays (nm). ``cv`` is
+    """In-RAM, run-aware flow-based GLIDE on a list of (T_i, N, 3) arrays (nm). ``cv`` is
     the collective-variable method: 'tica' (linear, default) or 'vampnet' (T6)."""
     ref = None
     aligned = []
@@ -257,7 +257,7 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
                        dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                        entropy="gaussian", flow_kind="realnvp",
                        predictive_kind="gru") -> Tuple[Artifact, dict]:
-    """T5: out-of-core EPC. ``chunk_factory()`` returns a FRESH iterator of (T_c, N, 3)
+    """T5: out-of-core GLIDE. ``chunk_factory()`` returns a FRESH iterator of (T_c, N, 3)
     coordinate chunks (e.g. from md.iterload). The trajectory is treated as ONE
     continuous run; the whole thing is never held in RAM -- only the small CVs and the
     sparse kept frames. Streaming TICA accumulates the same covariances as the batch
@@ -321,12 +321,12 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
                               predictive_kind=predictive_kind)
 
 
-def run_epc(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.10,
+def run_glide(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.10,
             epochs=300, nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14, n_bits=4,
             seed=0, streaming=False, chunk=2000, entropy="gaussian",
             flow_kind="realnvp", predictive_kind="gru",
             verbose=True) -> Tuple[Artifact, dict]:
-    """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based EPC.
+    """Load a DCD (heavy atoms of a solvent-stripped system) and run flow-based GLIDE.
     ``cv`` = 'tica' (default) or 'vampnet' (T6). ``streaming=True`` uses the out-of-core
     path (chunked md.iterload; TICA only)."""
     import mdtraj as md
@@ -337,7 +337,7 @@ def run_epc(top: str, dcd: str, *, stride=10, cv="tica", cv_dim=6, keep_frac=0.1
     lag = max(1, int(round(lag_ns / dt_strided_ns)))
     if verbose:
         print("=" * 70)
-        print("EPC on %s  (stride %d -> %.3f ns/frame, lag %d frames = %.2f ns; cv=%s%s)"
+        print("GLIDE on %s  (stride %d -> %.3f ns/frame, lag %d frames = %.2f ns; cv=%s%s)"
               % (dcd, stride, dt_strided_ns, lag, lag * dt_strided_ns, cv,
                  ", STREAMING" if streaming else ""))
         print("=" * 70)
@@ -410,16 +410,16 @@ def print_report(report: dict) -> None:
     print("  implied timescales    : %s ns" % np.round(r["implied_timescales_ns"], 1))
     print("KINETIC BOUND (path-distribution; retained Q vs reference P = full-data MSM)")
     print("  ensemble term         : %.3e nats" % kin["ensemble_kl_nats"])
-    print("  transition term       : %.3e nats/step  (~0 by construction: EPC retains the MSM)"
+    print("  transition term       : %.3e nats/step  (~0 by construction: GLIDE retains the MSM)"
           % kin["transition_kl_rate_nats_per_step"])
     print("  Pinsker pair bound    : %.3e   (the kinetic-observable guarantee)"
           % kin["pinsker_pair_bound"])
-    print("  NOTE: the contrast vs other compressors is `epc benchmark`; here Q==P so ~0.")
+    print("  NOTE: the contrast vs other compressors is `glide benchmark`; here Q==P so ~0.")
     print("=" * 70)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="flow-based EPC on a DCD (epc compress backend)")
+    ap = argparse.ArgumentParser(description="flow-based GLIDE on a DCD (glide compress backend)")
     ap.add_argument("top"); ap.add_argument("dcd")
     ap.add_argument("--stride", type=int, default=10)
     ap.add_argument("--cv-dim", type=int, default=6)
@@ -432,9 +432,9 @@ def main():
     ap.add_argument("--n-bits", type=int, default=4)
     ap.add_argument("--streaming", action="store_true", help="out-of-core (T5)")
     ap.add_argument("--chunk", type=int, default=2000)
-    ap.add_argument("-o", "--out", default=None, help="write artifact to this .epc path")
+    ap.add_argument("-o", "--out", default=None, help="write artifact to this .glide path")
     a = ap.parse_args()
-    art, report = run_epc(a.top, a.dcd, stride=a.stride, cv_dim=a.cv_dim,
+    art, report = run_glide(a.top, a.dcd, stride=a.stride, cv_dim=a.cv_dim,
                           keep_frac=a.keep_frac, epochs=a.epochs, nstates=a.nstates,
                           lag_ns=a.lag_ns, dt_ps=a.dt_ps, lat_bits=a.lat_bits,
                           n_bits=a.n_bits, streaming=a.streaming, chunk=a.chunk)

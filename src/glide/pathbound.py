@@ -1,14 +1,14 @@
 """
-epc_pathbound.py
+glide_pathbound.py
 ================
-The kinetic half of the EPC guarantee: a divergence on the TRAJECTORY (path)
+The kinetic half of the GLIDE guarantee: a divergence on the TRAJECTORY (path)
 distribution, not just the static ensemble. This is the module that turns the
 abstract's "analytic guarantee" into something that also covers KINETIC
 observables -- the part the ensemble (static) Pinsker bound does NOT cover.
 
 Why this module exists
 ----------------------
-The ensemble bound in epc.py controls observables of single configurations:
+The ensemble bound in glide.py controls observables of single configurations:
     |E_P[f] - E_Q[f]| <= sqrt( D(mu_P || mu_Q) / 2 )      for  f in [0,1].
 It says NOTHING about kinetics. Two ensembles with IDENTICAL stationary
 distributions can have arbitrarily different transition rates -- so preserving
@@ -31,10 +31,10 @@ Pinsker on the joint then bounds ANY bounded observable of consecutive pairs
 Transition fluxes / counts -- which determine rates -- are exactly such pairwise
 observables, so this IS a kinetic guarantee. The ensemble term alone is not.
 
-How EPC uses it
+How GLIDE uses it
 ---------------
-EPC retains the MSM transition matrix, so for the EPC artifact itself Q = P on
-the kept dynamics and the transition term is ~0 by construction -- i.e. EPC
+GLIDE retains the MSM transition matrix, so for the GLIDE artifact itself Q = P on
+the kept dynamics and the transition term is ~0 by construction -- i.e. GLIDE
 preserves kinetics. The module's real job is to be the MEASURING STICK for the
 contrast experiment: take ANY compressor's reconstruction, re-estimate its MSM
 Q at the same discretization, and report D(mu_P||mu_Q) (ensemble) vs the

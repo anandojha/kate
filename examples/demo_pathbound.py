@@ -2,7 +2,7 @@
 demo_pathbound.py
 =================
 The central thesis, made measurable: preserving the ENSEMBLE does not preserve
-KINETICS, and the path-distribution decomposition (epc_pathbound) detects the
+KINETICS, and the path-distribution decomposition (glide_pathbound) detects the
 difference the static ensemble bound misses.
 
 Setup: a 3-state reversible chain P_ref (the "truth"). We build two "compressed"
@@ -10,7 +10,7 @@ dynamics that share the SAME stationary distribution mu:
   Q_slow : off-diagonal flow scaled by c < 1  (mu identical, kinetics slower) --
            what an ensemble-only method can produce: right populations, wrong
            rates.
-  Q_good : a tiny perturbation of P_ref -- what EPC's retained MSM gives.
+  Q_good : a tiny perturbation of P_ref -- what GLIDE's retained MSM gives.
 
 It prints:
   - ensemble term D(mu||mu) ~ 0 for BOTH -> the static bound would certify both;
@@ -22,7 +22,7 @@ Exact (matrices, not sampling), so the numbers are the mechanism, not an
 estimate.
 """
 import numpy as np
-from epc.pathbound import (report_kinetic_fidelity, stationary_distribution)
+from glide.pathbound import (report_kinetic_fidelity, stationary_distribution)
 
 
 def _stochastic(P):
@@ -60,7 +60,7 @@ def main():
     c = 0.3
     Q_slow = scale_kinetics(mu, s, c)              # ensemble-faithful, kinetics wrong
     rng = np.random.default_rng(0)
-    Q_good = _stochastic(P_ref + 1e-3 * rng.random(P_ref.shape))   # ~ EPC retained MSM
+    Q_good = _stochastic(P_ref + 1e-3 * rng.random(P_ref.shape))   # ~ GLIDE retained MSM
 
     print("=" * 72)
     print("ENSEMBLE PRESERVED, KINETICS NOT -- detecting it with the path bound")
@@ -72,7 +72,7 @@ def main():
     print("  mu(Q_good):", np.round(stationary_distribution(Q_good), 4))
 
     for name, Q in [("Q_slow  (ensemble-only; rates x%.1f)" % c, Q_slow),
-                    ("Q_good  (retained MSM ~ EPC)", Q_good)]:
+                    ("Q_good  (retained MSM ~ GLIDE)", Q_good)]:
         r = report_kinetic_fidelity(P_ref, Q, lag=1, L=10000, k=2)
         print("-" * 72)
         print(name)
@@ -90,7 +90,7 @@ def main():
     print("=" * 72)
     print("Takeaway: the ensemble term is ~0 for BOTH, so the STATIC guarantee")
     print("certifies Q_slow as faithful -- yet its slowest timescale is wrong by")
-    print("~1/c = %.1fx. The transition term exposes exactly that gap; EPC retains" % (1.0 / c))
+    print("~1/c = %.1fx. The transition term exposes exactly that gap; GLIDE retains" % (1.0 / c))
     print("the MSM to keep it near zero, which is the kinetic half of the bound.")
     print("=" * 72)
 

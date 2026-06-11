@@ -1,5 +1,5 @@
-"""CLI / `epc bound` tests. The bound is the pure-numpy scorer: it must run without
-torch, give ~0 transition term against itself (EPC retains the MSM), and a large
+"""CLI / `glide bound` tests. The bound is the pure-numpy scorer: it must run without
+torch, give ~0 transition term against itself (GLIDE retains the MSM), and a large
 transition term against a kinetically-different reference (ensemble preserved,
 kinetics not)."""
 import subprocess
@@ -8,10 +8,10 @@ import sys
 import numpy as np
 import pytest
 
-from epc.cli import main
-from epc.artifact import save_artifact
-from epc.pathbound import report_kinetic_fidelity
-from epc.kinetic_codec import transition_matrix
+from glide.cli import main
+from glide.artifact import save_artifact
+from glide.pathbound import report_kinetic_fidelity
+from glide.kinetic_codec import transition_matrix
 from _synth import toy_artifact, metastable_coords
 
 
@@ -22,7 +22,7 @@ def test_bound_self_is_near_zero_cross_is_large():
     Ts, _ = transition_matrix(slow.counts, reversible=True)
     r_self = report_kinetic_fidelity(Tf, Tf, lag=1)
     r_cross = report_kinetic_fidelity(Tf, Ts, lag=1)
-    # EPC vs itself: kinetics preserved
+    # GLIDE vs itself: kinetics preserved
     assert r_self["transition_kl_rate_nats_per_step"] < 1e-9
     # vs a slower chain with the SAME (uniform) stationary distribution:
     assert r_cross["ensemble_kl_nats"] < 1e-2          # ensemble preserved
@@ -31,8 +31,8 @@ def test_bound_self_is_near_zero_cross_is_large():
 
 
 def test_bound_cli_runs_and_reports(tmp_path, capsys):
-    q = str(tmp_path / "q.epc")
-    r = str(tmp_path / "r.epc")
+    q = str(tmp_path / "q.glide")
+    r = str(tmp_path / "r.glide")
     save_artifact(toy_artifact(a=0.05, seed=1), q)
     save_artifact(toy_artifact(a=0.01, seed=2), r)
     main(["bound", q, r])
@@ -43,13 +43,13 @@ def test_bound_cli_runs_and_reports(tmp_path, capsys):
 
 
 def test_bound_cli_is_torch_free(tmp_path):
-    q = str(tmp_path / "q.epc")
-    r = str(tmp_path / "r.epc")
+    q = str(tmp_path / "q.glide")
+    r = str(tmp_path / "r.glide")
     save_artifact(toy_artifact(a=0.05, seed=1), q)
     save_artifact(toy_artifact(a=0.01, seed=2), r)
     code = (
         "import sys\n"
-        "from epc.cli import main\n"
+        "from glide.cli import main\n"
         f"main(['bound', {q!r}, {r!r}])\n"
         "raise SystemExit(1 if 'torch' in sys.modules else 0)\n"
     )
@@ -59,14 +59,14 @@ def test_bound_cli_is_torch_free(tmp_path):
 
 def test_compress_decompress_bound_end_to_end(tmp_path):
     pytest.importorskip("torch")
-    from epc.runner import compress_trajectory
-    from epc.artifact import save_artifact as _save, load_artifact as _load
+    from glide.runner import compress_trajectory
+    from glide.artifact import save_artifact as _save, load_artifact as _load
     coords = metastable_coords(n_steps=1500, n_atoms=6, seed=0)
     art, report = compress_trajectory([coords], cv_dim=2, keep_frac=0.1, epochs=40,
                                       nstates=30, lag=10, seed=0, verbose=False)
-    # EPC retains the MSM -> the self path bound's transition term is ~0
+    # GLIDE retains the MSM -> the self path bound's transition term is ~0
     assert report["kinetic_bound"]["transition_kl_rate_nats_per_step"] < 1e-6
-    p = str(tmp_path / "e.epc")
+    p = str(tmp_path / "e.glide")
     _save(art, p)
     loaded = _load(p, with_flow=True)
     assert loaded.n_keep == art.n_keep

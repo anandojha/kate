@@ -22,7 +22,7 @@ a fixed mode vector proportional to xi, plus fast Gaussian "thermal" noise.
 """
 
 import numpy as np
-from epc.kinetic_codec import KineticCodec, kabsch_align, implied_timescales
+from glide.kinetic_codec import KineticCodec, kabsch_align, implied_timescales
 
 
 WELLS = np.array([-2.0, 0.0, 2.0])
@@ -135,7 +135,7 @@ def main():
     print("  that converges UPWARD with lag (Prinz et al.); on raw Cartesian the slow mode")
     print("  is under-resolved, so the single-lag value is featurization- and library-")
     print("  sensitive (it is NOT the published kinetics). The ROBUST path is deeptime")
-    print("  (reversible-MLE MSM + lag scan: `epc analyze`) and, for nonlinear slow CVs,")
+    print("  (reversible-MLE MSM + lag scan: `glide analyze`) and, for nonlinear slow CVs,")
     print("  VAMPnets [T6]. The thermodynamics -- macrostate populations above -- ARE")
     print("  preserved. The codec stores the run-aware COUNT matrix, so those estimators")
     print("  run directly on the compressed object -- still no coordinate decode.")

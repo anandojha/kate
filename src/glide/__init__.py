@@ -1,13 +1,14 @@
 """
-epc -- Ensemble-Preserving Compression of MD trajectories, with a kinetic
+glide -- Generative Latent Invertible Dynamics-preserving Encoder (GLIDE):
+kinetics-preserving compression of MD trajectories, with a kinetic
 (path-distribution) fidelity bound.
 
 Thesis: ensemble-preserving compression does NOT preserve kinetics. Two ensembles
-with identical stationary distributions can have different rates. EPC adds a
+with identical stationary distributions can have different rates. GLIDE adds a
 path-distribution bound -- KL(path) = ensemble term + transition term -- so KINETIC
 observables are covered. The kinetic bound is the headline, not the architecture.
 
-Import hygiene (deliberate): importing ``epc`` -- or ``from epc import pathbound``
+Import hygiene (deliberate): importing ``glide`` -- or ``from glide import pathbound``
 -- pulls in NEITHER torch NOR deeptime, so the pure-numpy path (the kinetic
 ``bound``) runs on a box without either installed. torch-backed pieces (flow,
 codec, runner, spline_flow, temporal_prior) and deeptime-backed pieces
@@ -31,16 +32,16 @@ from .pathbound import (  # noqa: E402
     stationary_distribution,
 )
 
-# Everything below is served lazily so that importing ``epc`` never drags in torch
+# Everything below is served lazily so that importing ``glide`` never drags in torch
 # or deeptime. name -> (submodule, attribute).
 _LAZY = {
-    "EPCCodec": ("codec", "EPCCodec"),
-    "EPCArtifact": ("codec", "EPCArtifact"),
+    "GlideCodec": ("codec", "GlideCodec"),
+    "GlideArtifact": ("codec", "GlideArtifact"),
     "igfs_select": ("codec", "igfs_select"),
     "RealNVP": ("flow", "RealNVP"),
     "KineticCodec": ("kinetic_codec", "KineticCodec"),
     "CompressedTrajectory": ("kinetic_codec", "CompressedTrajectory"),
-    "run_epc": ("runner", "run_epc"),
+    "run_glide": ("runner", "run_glide"),
     "save_artifact": ("artifact", "save_artifact"),
     "load_artifact": ("artifact", "load_artifact"),
 }

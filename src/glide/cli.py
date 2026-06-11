@@ -1,14 +1,14 @@
 """
-cli.py -- the single ``epc`` entry point.
+cli.py -- the single ``glide`` entry point.
 
-  epc compress   TOP DCD -o ART      align -> CV/flow -> IGFS -> entropy code + MSM
-  epc decompress ART -o OUT          flow inverse for kept frames (+T4 full-atom)
-  epc analyze    ART                 deeptime MSM: timescales, lag scan, Bayesian bars  [T2]
-  epc bound      ART REF             ensemble term, transition term, Pinsker pair/path
-  epc benchmark  TOP DCD             EPC vs MDZip/SZ3/ZFP, scored by the path bound      [T3]
+  glide compress   TOP DCD -o ART      align -> CV/flow -> IGFS -> entropy code + MSM
+  glide decompress ART -o OUT          flow inverse for kept frames (+T4 full-atom)
+  glide analyze    ART                 deeptime MSM: timescales, lag scan, Bayesian bars  [T2]
+  glide bound      ART REF             ensemble term, transition term, Pinsker pair/path
+  glide benchmark  TOP DCD             GLIDE vs MDZip/SZ3/ZFP, scored by the path bound      [T3]
 
 Imports are LAZY PER SUBCOMMAND: the module top level imports only argparse, and each
-handler imports only what it needs. So ``epc bound`` (pure numpy) never imports torch
+handler imports only what it needs. So ``glide bound`` (pure numpy) never imports torch
 or deeptime -- the kinetic guarantee runs on a box without either.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ def _is_artifact_dir(path: str) -> bool:
 
 
 def _load_reference_counts(path: str):
-    """Reference dynamics P for `bound`: an .epc artifact (use its counts) or an
+    """Reference dynamics P for `bound`: an .glide artifact (use its counts) or an
     .npy/.npz holding a count/transition matrix."""
     import numpy as np
     if _is_artifact_dir(path):
@@ -45,9 +45,9 @@ def _load_reference_counts(path: str):
 # subcommands
 # ----------------------------------------------------------------------------- #
 def cmd_compress(args):
-    from .runner import run_epc, print_report
+    from .runner import run_glide, print_report
     from .artifact import save_artifact
-    art, report = run_epc(
+    art, report = run_glide(
         args.top, args.dcd, stride=args.stride, cv=args.cv, cv_dim=args.cv_dim,
         keep_frac=args.keep_frac, epochs=args.epochs, nstates=args.nstates,
         lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
@@ -118,7 +118,7 @@ def cmd_bound(args):
     if Cp.shape[0] != Cq.shape[0]:
         print("  WARNING: reference (%d) and artifact (%d) state counts differ; comparing"
               " the first %d states. For a FAIR comparison discretize both on COMMON"
-              " k-means centers (see `epc benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
+              " k-means centers (see `glide benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
     Cp, Cq = Cp[:n, :n], Cq[:n, :n]
     act = largest_connected_set(Cp + Cq)        # ergodic under the combined counts
     P, _ = transition_matrix(Cp[np.ix_(act, act)], reversible=True)
@@ -166,8 +166,8 @@ def cmd_analyze(args):
     from .artifact import load_artifact
     from . import kinetics_deeptime as kd
     if not kd._HAVE_DEEPTIME:
-        raise SystemExit("`epc analyze` needs the kinetics engine: "
-                         "pip install epc[kinetics]  (deeptime). Original error: %r"
+        raise SystemExit("`glide analyze` needs the kinetics engine: "
+                         "pip install glide[kinetics]  (deeptime). Original error: %r"
                          % (kd._IMPORT_ERR,))
 
     art = load_artifact(args.artifact, with_flow=False)
@@ -279,14 +279,15 @@ def cmd_benchmark(args):
 # ----------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="epc",
-        description="Ensemble-Preserving Compression of MD trajectories, with a "
+        prog="glide",
+        description="GLIDE (Generative Latent Invertible Dynamics-preserving Encoder): "
+                    "kinetics-preserving compression of MD trajectories, with a "
                     "kinetic (path-distribution) fidelity bound.")
     sub = p.add_subparsers(dest="command", required=True)
 
-    c = sub.add_parser("compress", help="TOP DCD -> artifact (flow EPC + retained MSM)")
+    c = sub.add_parser("compress", help="TOP DCD -> artifact (flow codec + retained MSM)")
     c.add_argument("top"); c.add_argument("dcd")
-    c.add_argument("-o", "--out", required=True, help="output artifact path (NAME.epc)")
+    c.add_argument("-o", "--out", required=True, help="output artifact path (NAME.glide)")
     c.add_argument("--stride", type=int, default=10)
     c.add_argument("--cv-dim", type=int, default=6)
     c.add_argument("--keep-frac", type=float, default=0.10)
@@ -332,10 +333,10 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--L", type=int, default=None, help="trajectory length for the path KL")
     b.set_defaults(func=cmd_bound)
 
-    k = sub.add_parser("benchmark", help="TOP DCD -> contrast table+plot (EPC vs baselines)")
+    k = sub.add_parser("benchmark", help="TOP DCD -> contrast table+plot (GLIDE vs baselines)")
     k.add_argument("top"); k.add_argument("dcd")
-    k.add_argument("--methods", default="epc,sz3,zfp,mdzip",
-                   help="comma list: epc, sz3, zfp, mdzip, shuffle, quantize")
+    k.add_argument("--methods", default="glide,sz3,zfp,mdzip",
+                   help="comma list: glide, sz3, zfp, mdzip, shuffle, quantize")
     k.add_argument("--stride", type=int, default=10)
     k.add_argument("--lag", type=int, default=10)
     k.add_argument("--nstates", type=int, default=100)

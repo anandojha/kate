@@ -8,7 +8,7 @@ coupling, so it fits the latent density better -> a tighter KL and therefore a t
 Pinsker bound -- with EXACTLY the same invertibility (the spline is monotone by
 construction, with closed-form inverse). RealNVP stays the reproducible default
 (flow.RealNVP); SplineFlow is a drop-in alternative (same forward/inverse/log_prob/
-sample/fit interface) selected by `epc compress --flow spline`.
+sample/fit interface) selected by `glide compress --flow spline`.
 
 Neural spline flows / MAF / equivariant flows are PRIOR ART -- cited, not claimed; the
 architecture is NOT the headline (the kinetic bound is). The optional ``nflows`` extra
@@ -206,7 +206,7 @@ class SplineFlow(nn.Module):
 
 
 if __name__ == "__main__":
-    # quick invertibility + density self-test (mirrors epc.flow)
+    # quick invertibility + density self-test (mirrors glide.flow)
     torch.manual_seed(0)
     rng = np.random.default_rng(0)
     n = 6000

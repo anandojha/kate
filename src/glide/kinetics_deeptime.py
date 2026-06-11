@@ -187,7 +187,7 @@ def format_resolution(report, total_us=None):
 
 def msm_for_pathbound(dtrajs, lag, reversible=True):
     """Return (transition_matrix, active_state_indices) for handing to
-    epc_pathbound.report_kinetic_fidelity. To compare two compressors fairly,
+    glide_pathbound.report_kinetic_fidelity. To compare two compressors fairly,
     discretize BOTH against the SAME k-means centers, then estimate each MSM
     here, then map both transition matrices onto a common active-state index
     set before calling the path bound (see baselines.py / INSTRUCTIONS)."""

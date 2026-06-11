@@ -4,10 +4,10 @@ benchmark.py
 The T3 contrast -- the paper's central figure. ONE pipeline:
 
   load trajectory
-    -> {EPC, baselines}  reconstruct  (EPC RETAINS its MSM; baselines reconstruct coords)
+    -> {GLIDE, baselines}  reconstruct  (GLIDE RETAINS its MSM; baselines reconstruct coords)
     -> featurize with a COMMON TICA and discretize against COMMON k-means centers
     -> reversible MSM per method on the SAME active-state support  (matched indexing)
-    -> epc_pathbound score vs the ORIGINAL MSM  (ensemble term + transition term)
+    -> glide_pathbound score vs the ORIGINAL MSM  (ensemble term + transition term)
     -> table + plot (implied timescales / transition-term per method).
 
 Why matched support, not deeptime's per-method largest-connected-set: the path bound
@@ -16,10 +16,10 @@ state indexing. We therefore fix ONE active set (largest connected set of the
 reference counts) and estimate every method's reversible MSM on exactly those states.
 This is the fair-comparison discipline RECIPE T3 asks for (same features, same centers,
 same lag) carried through to the estimator. (The headline single-method kinetics use
-deeptime's reversible MLE via `epc analyze`; here the CONTRAST is the deliverable.)
+deeptime's reversible MLE via `glide analyze`; here the CONTRAST is the deliverable.)
 
 Expected result (the claim): ensemble-only / coordinate-bounded methods show a large
-TRANSITION term (their implied timescales drift); EPC's is ~0 because it retains the
+TRANSITION term (their implied timescales drift); GLIDE's is ~0 because it retains the
 MSM. The ensemble term is small for all -- which is exactly why the static bound would
 WRONGLY certify the others as faithful.
 """
@@ -41,7 +41,7 @@ def _assign(CV, centers):
     return cKDTree(np.asarray(centers)).query(np.asarray(CV))[1].astype(np.int64)
 
 
-def run_benchmark(coords_runs, methods=("epc", "shuffle", "quantize"), *, lag=10,
+def run_benchmark(coords_runs, methods=("glide", "shuffle", "quantize"), *, lag=10,
                   nstates=50, cv_dim=2, dt_strided_ns=0.1, out=None, seed=0,
                   verbose=True):
     """Score each method's kinetic fidelity against the original MSM. Returns a list
@@ -67,8 +67,8 @@ def run_benchmark(coords_runs, methods=("epc", "shuffle", "quantize"), *, lag=10
     results = []
     for m in methods:
         m = m.lower()
-        if m == "epc":
-            # EPC RETAINS the MSM -> its kinetics ARE the reference dynamics.
+        if m == "glide":
+            # GLIDE RETAINS the MSM -> its kinetics ARE the reference dynamics.
             Q = P
             note = "retained MSM (kinetics not re-estimated)"
             available = True
@@ -129,7 +129,7 @@ def _print_table(results, its_ref_ns):
                  r["pinsker_pair"], t2))
     print("-" * 84)
     print("Reading: a small ENSEMBLE term with a large TRANSITION term = 'ensemble")
-    print("preserved, kinetics not' -- the static bound would wrongly certify it. EPC's")
+    print("preserved, kinetics not' -- the static bound would wrongly certify it. GLIDE's")
     print("transition term is ~0 because it retains the MSM. (Real MDZip/SZ3/ZFP numbers")
     print("come from their cluster runs; 'shuffle'/'quantize' are local stand-ins.)")
     print("=" * 84)
@@ -141,7 +141,7 @@ def _plot(results, its_ref_ns, out):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception as e:  # pragma: no cover
-        print("  (matplotlib unavailable: %s -- skipping plot; pip install epc[kinetics])" % e)
+        print("  (matplotlib unavailable: %s -- skipping plot; pip install glide[kinetics])" % e)
         return
     avail = [r for r in results if r.get("available")]
     if not avail:
@@ -151,14 +151,14 @@ def _plot(results, its_ref_ns, out):
     t2 = [r["its_cmp_ns"][0] if len(r["its_cmp_ns"]) else np.nan for r in avail]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-    ax1.bar(names, trans, color=["#2a7" if n == "epc" else "#c44" for n in names])
+    ax1.bar(names, trans, color=["#2a7" if n == "glide" else "#c44" for n in names])
     ax1.set_yscale("symlog", linthresh=1e-6)
     ax1.set_ylabel("transition term  h(P||Q)  (nats/step)")
     ax1.set_title("Kinetic distortion (lower = better)")
     ax1.axhline(0, color="k", lw=0.5)
 
     ax2.axhline(its_ref_ns[0], color="k", ls="--", lw=1, label="reference t2")
-    ax2.bar(names, t2, color=["#2a7" if n == "epc" else "#c44" for n in names])
+    ax2.bar(names, t2, color=["#2a7" if n == "glide" else "#c44" for n in names])
     ax2.set_ylabel("slowest implied timescale  t2  (ns)")
     ax2.set_title("Slowest timescale per method")
     ax2.legend()

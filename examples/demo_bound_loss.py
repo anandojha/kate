@@ -1,7 +1,7 @@
 """
 demo_bound_loss.py  --  T10: the kinetic path-bound used as a TRAINING LOSS.
 ============================================================================
-This is the §2 sanity check for `epc.bound_loss`: it demonstrates the one place
+This is the §2 sanity check for `glide.bound_loss`: it demonstrates the one place
 where the ML and the novel idea become the same thing -- a compressor's bit
 allocation trained to minimize the *kinetic* path-bound term instead of
 coordinate error.
@@ -17,7 +17,7 @@ THE CONTRAST (a fixed total bit budget B/frame, allocated two ways):
            Water-fills bits by amplitude -> pours the whole budget into the fast
            noise, spends ~0 bits on the low-amplitude slow coordinate.
   "kin"  : minimize the differentiable transition term h(P||Q) of the soft MSM
-           (epc.bound_loss) -- discovers it must protect dim 0 and starve the rest.
+           (glide.bound_loss) -- discovers it must protect dim 0 and starve the rest.
 
 THE RESULT (printed below): at EQUAL total rate, raw-MSE's kinetic distortion is
 ~flat in budget (more bits buy NO kinetic fidelity -- they go to the wrong place),
@@ -32,7 +32,7 @@ HONEST SCOPE -- read this:
     MSM's transition term is dominated by sampling noise, so the bound gives little
     training signal. That is a sampling limit of that trajectory, not of the method.
   * The certified kinetics in the paper still come from the deeptime reversible-MLE
-    MSM + the path bound on hard states (epc.pathbound). bound_loss is the
+    MSM + the path bound on hard states (glide.pathbound). bound_loss is the
     differentiable SURROGATE used as a loss; whether it beats MSE on real data is an
     empirical question to be answered on a well-sampled system.
 """
@@ -40,7 +40,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from epc.bound_loss import (SoftStateEncoder, soft_transition_matrix,
+from glide.bound_loss import (SoftStateEncoder, soft_transition_matrix,
                             transition_term, _lagged)
 
 LAG = 20

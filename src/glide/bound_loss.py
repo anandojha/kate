@@ -22,8 +22,8 @@ for KINETICS. Everything here is pure torch (autograd); deeptime is not needed.
 
 Honest scope: this is the differentiable SURROGATE of the bound (soft states + a
 regression transition matrix), used as a loss. The reported, certified kinetics still
-come from the deeptime reversible-MLE MSM + the path bound on hard states (epc.pathbound
-/ epc.analyze). Whether training on the bound actually beats training on MSE is an
+come from the deeptime reversible-MLE MSM + the path bound on hard states (glide.pathbound
+/ glide.analyze). Whether training on the bound actually beats training on MSE is an
 EMPIRICAL question -- measured, not assumed (see examples / the T10 experiment).
 """
 from __future__ import annotations

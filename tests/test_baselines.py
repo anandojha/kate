@@ -4,7 +4,7 @@ subprocess bodies (with a mocked tool, since the real binaries are cluster-side)
 import numpy as np
 import pytest
 
-import epc.baselines as bl
+import glide.baselines as bl
 
 
 def _coords(seed=0):
@@ -19,16 +19,16 @@ def test_pseudo_baselines():
 
 
 def test_available_local_and_external(monkeypatch):
-    assert bl.available("epc") and bl.available("shuffle") and bl.available("quantize")
-    monkeypatch.delenv("EPC_SZ3_BIN", raising=False)
+    assert bl.available("glide") and bl.available("shuffle") and bl.available("quantize")
+    monkeypatch.delenv("GLIDE_SZ3_BIN", raising=False)
     monkeypatch.setattr(bl.shutil, "which", lambda x: None)
     assert not bl.available("sz3")
-    monkeypatch.setenv("EPC_SZ3_BIN", "/some/sz3")
+    monkeypatch.setenv("GLIDE_SZ3_BIN", "/some/sz3")
     assert bl.available("sz3")
 
 
 def test_require_external_raises_when_absent(monkeypatch):
-    monkeypatch.delenv("EPC_ZFP_BIN", raising=False)
+    monkeypatch.delenv("GLIDE_ZFP_BIN", raising=False)
     monkeypatch.setattr(bl.shutil, "which", lambda x: None)
     with pytest.raises(bl.BaselineUnavailable):
         bl._require_external("zfp")
@@ -44,7 +44,7 @@ def test_reconstruct_dispatch_and_unknown():
 
 def test_external_methods_unavailable_dispatch(monkeypatch):
     monkeypatch.setattr(bl.shutil, "which", lambda x: None)
-    for env in ("EPC_SZ3_BIN", "EPC_ZFP_BIN", "EPC_MDZIP_DIR"):
+    for env in ("GLIDE_SZ3_BIN", "GLIDE_ZFP_BIN", "GLIDE_MDZIP_DIR"):
         monkeypatch.delenv(env, raising=False)
     for m in ("sz3", "zfp", "mdzip"):
         with pytest.raises(bl.BaselineUnavailable):

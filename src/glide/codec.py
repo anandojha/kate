@@ -1,7 +1,8 @@
 """
-epc.py
-======
-Ensemble-Preserving Compression, the flow-based version from the abstract.
+codec.py
+========
+The GLIDE codec -- kinetics-preserving compression, the flow-based version from the
+abstract.
 
 Pipeline (each stage is the abstract's):
   1. align (Kabsch) and learn a normalizing flow density p(x) over configurations
@@ -139,11 +140,11 @@ def igfs_select(z: np.ndarray, n_keep: int, seed: int = 0) -> np.ndarray:
 
 
 # ============================================================================
-# EPC codec
+# GLIDE codec
 # ============================================================================
 
 @dataclass
-class EPCArtifact:
+class GlideArtifact:
     coded_latents: bytes          # entropy-coded base-space latents of kept frames
     n_keep: int
     dim: int
@@ -159,7 +160,7 @@ class EPCArtifact:
     centers: np.ndarray
 
 
-class EPCCodec:
+class GlideCodec:
     def __init__(self, n_keep_frac=0.1, flow_layers=10, flow_hidden=64,
                  flow_epochs=200, lat_bits=12, zmax=5.0,
                  tica_lag=10, tica_dim=2, n_states=80, msm_lag=10, seed=0):
@@ -176,7 +177,7 @@ class EPCCodec:
         self.msm_lag = msm_lag
         self.seed = seed
 
-    def fit_encode(self, runs: List[np.ndarray], verbose=True) -> EPCArtifact:
+    def fit_encode(self, runs: List[np.ndarray], verbose=True) -> GlideArtifact:
         # align + flatten
         ref = None
         aligned = []
@@ -222,13 +223,13 @@ class EPCCodec:
         C = count_matrix(labels, self.n_states, self.msm_lag)
         T_msm, _ = transition_matrix(C, reversible=True)
 
-        return EPCArtifact(coded_latents=coded, n_keep=len(kept), dim=dim,
+        return GlideArtifact(coded_latents=coded, n_keep=len(kept), dim=dim,
                            L=self.L, zmax=zmax, flow=flow, kept_idx=kept,
                            T_msm=T_msm, counts=C, lag=self.msm_lag, tica=tica,
                            centers=centers)
 
     @staticmethod
-    def decode_ensemble(ct: EPCArtifact) -> np.ndarray:
+    def decode_ensemble(ct: GlideArtifact) -> np.ndarray:
         """Reconstruct the kept representative configurations (the compressed
         ensemble). Exact up to latent quantization, because the flow inverts
         exactly."""
@@ -242,7 +243,7 @@ class EPCCodec:
         return x.reshape(ct.n_keep, N, 3)
 
     @staticmethod
-    def kinetics(ct: EPCArtifact, k=5):
+    def kinetics(ct: GlideArtifact, k=5):
         active = largest_connected_set(ct.counts)
         Tc, _ = transition_matrix(ct.counts[np.ix_(active, active)], reversible=True)
         return implied_timescales(Tc, ct.lag, k)

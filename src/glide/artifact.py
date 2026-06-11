@@ -1,12 +1,12 @@
 """
 artifact.py
 ===========
-On-disk format for an EPC artifact -- the compressed object that IS the analysis
+On-disk format for an GLIDE artifact -- the compressed object that IS the analysis
 substrate. Designed to be METHOD-TAG aware up front (cv / flow / entropy) so the
 T6-T8 ML variants slot in without reworking the schema, and to be loadable WITHOUT
-torch so that `epc bound` (pure numpy) runs on a box with neither torch nor deeptime.
+torch so that `glide bound` (pure numpy) runs on a box with neither torch nor deeptime.
 
-Layout (a directory ``NAME.epc/``):
+Layout (a directory ``NAME.glide/``):
   config.json   scalars + method tags + flow architecture + time metadata
   arrays.npz    coded latents, kept indices, k-means centers, counts, retained MSM,
                 the run-aware ALL-FRAME dtraj (integer labels), TICA params
@@ -171,7 +171,7 @@ def save_artifact(art: Artifact, path: str) -> str:
 
 def load_artifact(path: str, with_flow: bool = True) -> Artifact:
     """Load an artifact. ``with_flow=False`` reads NO torch and NO flow.pt -- used by
-    `epc bound` so the kinetic bound runs without torch/deeptime installed."""
+    `glide bound` so the kinetic bound runs without torch/deeptime installed."""
     with open(os.path.join(path, "config.json")) as fh:
         cfg = json.load(fh)
     npz = np.load(os.path.join(path, "arrays.npz"), allow_pickle=False)

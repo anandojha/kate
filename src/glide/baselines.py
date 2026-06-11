@@ -1,7 +1,7 @@
 """
 baselines.py
 ============
-The external compressors EPC is benchmarked against (the T3 contrast), plus local
+The external compressors GLIDE is benchmarked against (the T3 contrast), plus local
 "pseudo-baselines" so the contrast harness runs end-to-end ANYWHERE.
 
 External baselines (MDZip / SZ3 / ZFP) build and run in their OWN environments and on
@@ -37,8 +37,8 @@ class BaselineUnavailable(RuntimeError):
 
 
 # env var that points at each external tool (binary or repo dir)
-_ENV = {"sz3": "EPC_SZ3_BIN", "zfp": "EPC_ZFP_BIN", "mdzip": "EPC_MDZIP_DIR"}
-_LOCAL = {"epc", "shuffle", "quantize"}
+_ENV = {"sz3": "GLIDE_SZ3_BIN", "zfp": "GLIDE_ZFP_BIN", "mdzip": "GLIDE_MDZIP_DIR"}
+_LOCAL = {"glide", "shuffle", "quantize"}
 
 
 def available(method: str) -> bool:
@@ -117,7 +117,7 @@ def run_mdzip(coords: np.ndarray, top: str = None, **kw) -> np.ndarray:
     _require_external("mdzip")
     raise BaselineUnavailable(
         "MDZip runs in its own env on the cluster (compress(traj,top,...) / decompress"
-        "(...)); wire $EPC_MDZIP_DIR and its python there. Not run locally.")
+        "(...)); wire $GLIDE_MDZIP_DIR and its python there. Not run locally.")
 
 
 def reconstruct(method: str, coords: np.ndarray, **kw) -> np.ndarray:
