@@ -60,7 +60,20 @@ kinetic (path-distribution) fidelity bound.
   (`docs/ntl9_t9_gate.png`): on the resolved sub-µs band, with closed-loop DPCM
   reconstruction, predictive preserves the kinetics at ~half to a third the rate of
   static (0.8% timescale error at 10 bits/frame vs static 1.5% at 26). Empirical.
-- **~99% test coverage** (118 tests); torch/deeptime tests auto-skip when absent.
+- **Code review (physics + competitive) and its fixes** (`docs/REVIEW.md`): audited the
+  core against bgflow/bgmol, deeptime, mdzip, sz3/zfp. Resulting changes:
+  - **Certified kinetics now use deeptime's reversible MLE** (`estimate_reversible_T`,
+    prefers deeptime, falls back to `(C+Cᵀ)/2`); artifact records `msm_estimator`. The
+    portable `glide bound` stays torch/deeptime-free on the symmetrized estimator.
+  - **`glide analyze --mfpt N`**: PCCA+ metastable coarse-graining + mean first-passage
+    times — the k_on/k_off rate observables the bound covers, now actually computed.
+  - **`glide compress --features contacts`**: invariant inter-atomic-distance TICA
+    featurization (removes spurious rigid-body slow modes; reconstruction unaffected).
+  - **Steric-validity check** on decoded frames flags reconstruction-introduced overlaps.
+  - **Path bound honors support**: `kinetic_bound_valid` / Pinsker = inf when the true
+    divergence is +∞ (a missed transition); `glide bound` warns.
+  - Honest competitive positioning in README (GLIDE is not a pure-compression winner).
+- **~99% test coverage** (124 tests); torch/deeptime tests auto-skip when absent.
 
 ### Notes
 - `deeptime` is an optional `[kinetics]` extra; `compress` / `decompress` / `bound` run

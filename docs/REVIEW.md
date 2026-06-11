@@ -63,17 +63,33 @@ The production path (`runner.py:104-110`), the benchmark contrast (`benchmark.py
 
 ## D. Prioritized roadmap ("best of all worlds")
 
+> **Resolution status (updated):** Tier 1 items 1, 3, 4 and Tier 2 items 5, 6, 7, 8 are
+> DONE (commits `294feac`, `2dd91fa`, `4276d07`, `1ed16e6`, `f909185`). Remaining: B2
+> (IGFS↔ensemble reconciliation) and Tier 3 (compression competitiveness).
+
 **Tier 1 — correctness & honesty (do first; mostly bounded):**
-1. **Route certified kinetics through deeptime's reversible MLE** (B1) — the single highest-value change. Keep `(C+Cᵀ)/2` for entropy coding only; fall back when deeptime absent; label which estimator produced the numbers.
-2. **Reconcile IGFS with the ensemble bound** (B2) — reweight on decode, or restate the guarantee.
-3. **Honor `kinetic_bound_valid` everywhere** (B3) — done in `pathbound`/`cli`; extend to `benchmark`.
-4. **Tighten claims** — MDZip = coordinate-RMSD (not ensemble); state plainly that on rate/RMSD/speed GLIDE is not the winner; the in-repo benchmark is a conceptual contrast (real numbers = the NTL9 figures). *(Done in README this pass.)*
+1. ✅ **DONE** — **Routed certified kinetics through deeptime's reversible MLE** (B1,
+   `294feac`): `estimate_reversible_T` prefers the deeptime MLE, falls back to `(C+Cᵀ)/2`
+   when deeptime is absent; runner/benchmark use it; the artifact records `msm_estimator`.
+   `glide bound` stays the portable (C+Cᵀ)/2 scorer (deeptime pulls torch).
+2. ☐ **OPEN** — **Reconcile IGFS with the ensemble bound** (B2): reweight kept frames to
+   the stationary measure on decode, or restate what the IGFS subset guarantees. (The
+   runner already runs the *valid* ensemble check against flow samples; the gap is the
+   `codec.py` decode_ensemble framing.)
+3. ✅ **DONE** — **`kinetic_bound_valid`** gating (B3, `2dd91fa`): `pathbound`/`cli` report
+   the bound as invalid (Pinsker = inf) on support failure. *(Still to extend to `benchmark`.)*
+4. ✅ **DONE** — **Tightened claims** (`2dd91fa`): honest competitive positioning in README.
 
 **Tier 2 — physics rigor (high value):**
-5. **Report MFPT / committor preservation** (B4) via deeptime — turns the abstract bound into rate language.
-6. **PCCA+ metastable coarse-graining** — certify the bound on the few-state network; far more interpretable contrast.
-7. **Internal-coordinate / contact featurization as the default kinetic path** (not aligned Cartesian) — removes TICA's spurious rigid-body slow modes (`runner.py:208-217`). The code already *knows* this (`vampnet_cv.py:14-16`).
-8. **Energy/clash sanity check on decoded frames** (optional OpenMM hook) — certify reconstructions are physically valid, not just statistically close.
+5. ✅ **DONE** — **MFPT** reporting (B4, `4276d07`): `glide analyze --mfpt N` computes mean
+   first-passage times between PCCA+ metastable sets (k_on/k_off ~ 1/MFPT).
+6. ✅ **DONE** — **PCCA+ metastable coarse-graining** (`4276d07`): bundled with the MFPT report.
+7. ✅ **DONE** — **Internal-coordinate (contacts) featurization** (`1ed16e6`):
+   `glide compress --features contacts` (invariant inter-atomic distances; removes spurious
+   rigid-body slow modes). Opt-in; default stays cartesian to preserve the validated baseline.
+8. ✅ **DONE** — **Steric-validity check** (`f909185`): force-field-free min-inter-atomic-distance
+   check on decoded frames flags reconstruction-introduced atom overlaps. (A full OpenMM
+   energy hook remains optional future work.)
 
 **Tier 3 — compression competitiveness (if pure-ratio matters):**
 9. **Entropy-code the residual** instead of charging a flat bit rate (`kinetic_codec.py:682` even calls the flat rate an "upper bound") — the biggest honest ratio left on the table.
