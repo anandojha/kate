@@ -130,23 +130,24 @@ def cmd_bound(args):
               " k-means centers (see `kate benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
     Cp, Cq = Cp[:n, :n], Cq[:n, :n]
     act = largest_connected_set(Cp + Cq)        # ergodic under the combined counts
-    # Reported numbers route through deeptime's reversible MLE when it is installed
-    # (prefer='auto'), falling back to the pure-numpy (C+C^T)/2 symmetrized estimator so
-    # `bound` still runs without deeptime. The tag records which estimator produced the
-    # figures; the MLE is the less biased of the two and is what the paper reports.
-    P, estP = estimate_reversible_T(Cp[np.ix_(act, act)], prefer="auto")
-    Q, estQ = estimate_reversible_T(Cq[np.ix_(act, act)], prefer="auto")
+    # `bound` is the portable contrast scorer (pure numpy, no torch or deeptime; see
+    # test_bound_cli_is_torch_free) and therefore uses the (C+C^T)/2 symmetrized
+    # estimator. The publishable reversible-MLE numbers are produced by `kate analyze`
+    # and by the stored artifact MSM (both route through deeptime MLE via
+    # estimate_reversible_T with prefer='auto'); the paper reports those, not this scorer.
+    P, _ = estimate_reversible_T(Cp[np.ix_(act, act)], prefer="cc")
+    Q, _ = estimate_reversible_T(Cq[np.ix_(act, act)], prefer="cc")
     r = report_kinetic_fidelity(P, Q, lag=lag, L=L, k=4)
 
     dt = Q_art.dt_strided_ns
-    est_label = estP if estP == estQ else "%s / %s" % (estP, estQ)
     print("=" * 72)
     print("KINETIC FIDELITY  (path-distribution bound; lag=%d frames, L=%d)" % (lag, L))
     print("  artifact (Q)          : %s" % args.artifact)
     print("  reference (P)         : %s" % args.ref)
     print("  active states         : %d" % len(act))
-    print("  MSM estimator         : %s   (deeptime-mle = reversible MLE, the publishable"
-          " estimator; symmetrized-cc = pure-numpy fallback)" % est_label)
+    print("  MSM estimator         : (C+C^T)/2 symmetrized (portable scorer; `kate analyze`"
+          " and the stored artifact MSM give the deeptime reversible-MLE numbers the"
+          " paper reports)")
     print("-" * 72)
     print("  ensemble term   D(mu_P||mu_Q)     : %.4e nats   (STATIC bound sees only this)"
           % r["ensemble_kl_nats"])
