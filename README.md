@@ -12,7 +12,8 @@
 > rates. KATE adds a path-distribution (trajectory) bound,
 > `KL(path) = ensemble term + transition term`, so that kinetic observables
 > (timescales, MFPTs, k_on/k_off) are covered in addition to static ones. The
-> contribution is the kinetic bound rather than the architecture.
+> path-space bound itself is established prior art; the contribution is adopting it
+> as a compressor's fidelity objective, not the bound and not the architecture.
 
 This repository packages a tested research codebase as an installable library and CLI: a
 classical analysis-native codec, a from-scratch RealNVP normalizing flow, the
@@ -28,16 +29,47 @@ pip install "kate[kinetics] @ git+https://github.com/anandojha/kate.git"  # + de
 
 ## What is new
 
-The contribution is the first MD-trajectory compressor with a provable
-kinetic-observable bound. It unifies a generative density model (a normalizing
-flow), a Markov dynamics model (an MSM), and entropy coding under one
-path-distribution (KL/Pinsker) guarantee, and is shown to preserve kinetics where
-ensemble- and coordinate-bounded compressors do not.
+KATE is, to our knowledge, the first MD-trajectory compressor whose declared fidelity
+target is the kinetics. It adopts a path-distribution (relative-entropy-rate) bound as
+the operating objective of a codec that unifies a normalizing-flow density model, a
+Markov state model, and entropy coding, and shows that the slow timescales are
+preserved where ensemble- and coordinate-bounded compressors collapse them.
 
-The novelty lies in the end-to-end integration and in the kinetic bound as the organizing
-principle and contrast result, rather than in any claim that an individual component is new.
-Neural latent compression (MDZip, JCIM AE), error-bounded compression (SZ3/ZFP/MDZ),
-MSM-as-entropy-coder, and flow-as-density (Boltzmann Generators) are all prior art.
+The bound itself is not new. Path-space relative-entropy-rate and goal-oriented
+information bounds for stochastic dynamics are established prior art (see
+[Relation to prior work](#relation-to-prior-work)); KATE re-derives the discrete-Markov
+special case and applies it. The contribution is the application and the measured
+contrast, not a new theorem and not any individual component: normalizing flows
+(Boltzmann Generators), MSM-as-entropy-coder, learned entropy coding (MDZip, JCIM AE,
+SZ3/ZFP/MDZ), and VAMPnets are all reused prior art.
+
+## Relation to prior work
+
+The kinetic bound KATE uses is a special case of the path-space information bounds for
+stochastic dynamics developed in the uncertainty-quantification literature:
+
+- Pantazis & Katsoulakis, J. Chem. Phys. 138, 054115 (2013), arXiv:1210.7264 -
+  relative-entropy-rate (RER) path-space sensitivity for stationary stochastic dynamics.
+- Dupuis, Katsoulakis, Pantazis & Plechac, SIAM/ASA JUQ (2016), arXiv:1503.05136 -
+  goal-oriented path-space information bounds, tighter than plain RER/Pinsker.
+- Birrell, Katsoulakis & Rey-Bellet, arXiv:1906.09282 (2019) - path-space UQ bounds for
+  hitting times / mean first-passage times specifically.
+
+KATE's stationary-plus-transition factorization is the discrete-time finite-state Markov
+specialization of that RER object, and the observables it covers (implied timescales,
+MFPTs) are the ones this line of work already bounds. (These references were verified at
+abstract level; confirm the full text before the paper relies on exact theorem statements.)
+
+Observable-preserving compression is itself an established paradigm: QPET (Liu et al.,
+VLDB 2025, arXiv:2412.02799) and physics-aware rate-distortion (arXiv:2606.03279)
+constrain distortion in the space of physical quantities. KATE differs in the observable:
+the slow kinetics are a non-local functional of the whole path (implied timescales / MSM
+eigenvalues), which point-wise differentiable-QoI error bounds do not reach.
+
+The T10 idea of using the path bound as a training loss is developed concurrently and
+independently by Zou, Lie & Marzouk (arXiv:2603.20467, March 2026) for surrogate-SDE
+drift learning, which slightly predates this repository's public release; T10 is therefore
+positioned as concurrent work, not as first.
 
 ## Results on NTL9 (measured, real trajectory)
 
@@ -295,7 +327,9 @@ invertible and the bound intact, with no lossy CNN autoencoder):
   estimator on this system; aligning the two (soft states matched to the discretization)
   is the open problem. The certified kinetics still come from the deeptime reversible-MLE
   MSM and the path bound on hard states. Whether the surrogate beats MSE on real data is
-  empirical, and here it did not.
+  empirical, and here it did not. Concurrent, independent work (Zou, Lie & Marzouk,
+  arXiv:2603.20467, March 2026) develops the same path-bound-as-loss idea for surrogate-SDE
+  drift learning; T10 is positioned as concurrent, not first (see Relation to prior work).
 
 Defaults remain `--cv tica --flow realnvp --entropy gaussian` so the tested baseline and
 the kinetic bound are unchanged; the ML pieces are opt-ins.

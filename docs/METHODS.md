@@ -24,10 +24,17 @@ The central observation motivating KATE is the following.
 > tight tolerance and still collapse the implied timescales, because the slow modes
 > reside in a low-variance subspace that uniform error bounds do not protect.
 
-The contribution of KATE is a compressor built around an observable-space bound: a
-KL/Pinsker guarantee in the space of the *path distribution*, which is the quantity
-that covers the kinetics. The bound is the organizing principle, and the neural-network
-components are motivated by it rather than constituting the primary result.
+KATE is a compressor built around an observable-space bound: a KL/Pinsker guarantee in
+the space of the *path distribution*, which is the quantity that covers the kinetics.
+The bound is not itself new. Path-space relative-entropy-rate and goal-oriented
+information bounds for stochastic dynamics are established prior art (Pantazis &
+Katsoulakis 2013, arXiv:1210.7264; Dupuis, Katsoulakis, Pantazis & Plechac 2016,
+arXiv:1503.05136; Birrell, Katsoulakis & Rey-Bellet 2019, arXiv:1906.09282), and the
+factorization below is the discrete-time finite-state Markov specialization of that
+object. The contribution is the application: adopting this bound as the fidelity
+objective of a trajectory compressor, and the measured contrast against
+coordinate-bounded codecs. The neural-network components are motivated by that objective
+rather than constituting the primary result.
 
 ---
 
