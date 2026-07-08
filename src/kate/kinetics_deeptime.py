@@ -311,6 +311,96 @@ def format_mfpt(report):
     return "\n".join(lines)
 
 
+def ck_test(dtrajs, lag, n_metastable=2, factors=(1, 2, 3, 4, 6),
+            n_samples=50, reversible=True):
+    """Chapman-Kolmogorov test on metastable sets (Prinz et al., J. Chem. Phys. 134,
+    174105, 2011).
+
+    A Markov state model estimated at lag tau predicts longer-lag behaviour through the
+    Chapman-Kolmogorov relation T(k*tau) = T(tau)^k. This routine estimates Bayesian MSMs
+    at lag times lag*factors, coarse-grains onto `n_metastable` PCCA+ sets, and compares
+    the model prediction against the direct estimate at each lag. Passing the test is the
+    community-standard evidence that the retained dynamics are Markovian; a reconstruction
+    that corrupts the kinetics fails it.
+
+    Parameters
+    ----------
+    dtrajs : list of int arrays
+        Run-aware discrete trajectories.
+    lag : int
+        Base MSM lag in (strided) frames.
+    n_metastable : int
+        Number of PCCA+ metastable sets on which the test is evaluated.
+    factors : sequence of int
+        Lag-time multiples at which models are estimated.
+    n_samples : int
+        Bayesian MSM samples, used for the confidence band.
+
+    Returns
+    -------
+    dict
+        lagtimes, estimates and predictions (each of shape (n_lag, n_set, n_set)),
+        the Bayesian sample bands when available, `max_deviation` (the largest absolute
+        difference between predicted and estimated metastable self-transition
+        probabilities, a scalar summary of non-Markovianity), and the underlying deeptime
+        result object under `ck` for plotting.
+    """
+    _require()
+    models = []
+    for f in factors:
+        counts = TransitionCountEstimator(lagtime=int(lag * f),
+                                          count_mode="effective").fit_fetch(dtrajs)
+        counts = counts.submodel_largest()
+        models.append(BayesianMSM(reversible=reversible,
+                                  n_samples=int(n_samples)).fit_fetch(counts))
+    ck = models[0].ck_test(models, n_metastable_sets=int(n_metastable))
+    est = np.asarray(ck.estimates)                        # (n_lag, n_set, n_set)
+    pred = np.asarray(ck.predictions)
+    diag_dev = np.abs(np.einsum("lii->li", est) - np.einsum("lii->li", pred))
+    return {
+        "lagtimes": np.asarray(ck.lagtimes),
+        "estimates": est, "predictions": pred,
+        "estimates_samples": getattr(ck, "estimates_samples", None),
+        "predictions_samples": getattr(ck, "predictions_samples", None),
+        "max_deviation": float(diag_dev.max()) if diag_dev.size else float("nan"),
+        "n_metastable": int(n_metastable), "ck": ck,
+    }
+
+
+def bootstrap_timescales(dtrajs, lag, k=5, n_boot=100, n_blocks=20, seed=0,
+                         reversible=True):
+    """Block-bootstrap confidence intervals on the top-k implied timescales.
+
+    Whole trajectories are resampled with replacement (the standard non-parametric error
+    estimate over independent trajectories, e.g. the independent DE Shaw runs); a single
+    long trajectory is first split into `n_blocks` contiguous blocks so the resampling has
+    variance. Complements the Bayesian error bars from `bayes_timescales`.
+
+    Returns
+    -------
+    tuple of arrays or None
+        (mean, lo, hi) of the k timescales in frames at the 95 percent percentile
+        interval, or None if no bootstrap replicate converged.
+    """
+    _require()
+    rng = np.random.default_rng(int(seed))
+    dtrajs = [np.asarray(d) for d in dtrajs]
+    if len(dtrajs) == 1:
+        dtrajs = [b for b in np.array_split(dtrajs[0], int(n_blocks)) if len(b) > lag]
+    n = len(dtrajs)
+    samples = []
+    for _ in range(int(n_boot)):
+        boot = [dtrajs[i] for i in rng.integers(0, n, size=n)]
+        try:
+            samples.append(implied_timescales(boot, lag, k))
+        except Exception:
+            continue
+    if not samples:
+        return None
+    S = np.array(samples)
+    return S.mean(0), np.percentile(S, 2.5, 0), np.percentile(S, 97.5, 0)
+
+
 def msm_for_pathbound(dtrajs, lag, reversible=True):
     """Return (transition_matrix, active_state_indices) for the path bound.
 

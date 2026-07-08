@@ -279,6 +279,45 @@ def cmd_analyze(args):
                   "at lag %d (%s)." % (base_lag, type(e).__name__))
         print("  (A kinetic observable the SOURCE trajectory never sampled cannot be")
         print("   'preserved' by any compressor -- report this BEFORE comparing methods.)")
+
+    if args.cktest:
+        print("-" * 72)
+        print("CHAPMAN-KOLMOGOROV TEST  (%d metastable sets; the MSM is Markovian if the"
+              % args.nsets)
+        print("   predictions match the direct estimates within error -- Prinz et al. 2011)")
+        try:
+            ck = kd.ck_test(dtrajs, base_lag, n_metastable=int(args.nsets),
+                            n_samples=args.n_samples)
+            print("  lag times (frames)    : %s"
+                  % np.array2string(np.asarray(ck["lagtimes"])))
+            print("  max CK deviation      : %.4f   (metastable self-transition; small ="
+                  " Markovian)" % ck["max_deviation"])
+            print("  A reconstruction that CORRUPTS the kinetics inflates this deviation;")
+            print("  the retained MSM keeps it small -- the thesis in the field's own test.")
+            if args.ckplot:
+                import matplotlib; matplotlib.use("Agg")
+                import matplotlib.pyplot as plt
+                ck["ck"].plot(); plt.tight_layout(); plt.savefig(args.ckplot, dpi=130)
+                print("  CK plot written       : %s" % args.ckplot)
+        except Exception as e:
+            print("  CK test unavailable: the MSM/PCCA+ did not converge at lag %d (%s)."
+                  % (base_lag, type(e).__name__))
+
+    if args.bootstrap:
+        print("-" * 72)
+        print("BLOCK-BOOTSTRAP TIMESCALES  (%d resamples; 95%% percentile CI over runs)"
+              % args.bootstrap)
+        try:
+            res = kd.bootstrap_timescales(dtrajs, base_lag, k=k, n_boot=int(args.bootstrap))
+            if res is None:
+                print("  no bootstrap replicate converged.")
+            else:
+                mean, lo, hi = res
+                for i in range(len(mean)):
+                    print("  t%-2d : %8.1f ns   [%8.1f, %8.1f]"
+                          % (i + 2, mean[i] * dt, lo[i] * dt, hi[i] * dt))
+        except Exception as e:
+            print("  bootstrap unavailable (%s)." % type(e).__name__)
     print("-" * 72)
     print("Caveats (RECIPE T2): featurize on LIGAND-POCKET CONTACTS (not raw Cartesian)")
     print("for binding kinetics and align on protein only; report k_on/k_off ONLY if the")
@@ -372,6 +411,14 @@ def build_parser() -> argparse.ArgumentParser:
                         "them (the k_on/k_off rate observables; needs deeptime)")
     a.add_argument("--k", type=int, default=4, help="number of slow timescales")
     a.add_argument("--n-samples", type=int, default=100, help="Bayesian MSM samples")
+    a.add_argument("--cktest", action="store_true",
+                   help="Chapman-Kolmogorov test on metastable sets")
+    a.add_argument("--nsets", type=int, default=2, metavar="N",
+                   help="number of PCCA+ metastable sets for --cktest")
+    a.add_argument("--ckplot", default=None, metavar="PATH",
+                   help="write the CK-test figure to PATH (requires --cktest)")
+    a.add_argument("--bootstrap", type=int, default=0, metavar="N",
+                   help="block-bootstrap timescale CIs with N resamples")
     a.set_defaults(func=cmd_analyze)
 
     b = sub.add_parser("bound", help="artifact ref -> kinetic-fidelity report")

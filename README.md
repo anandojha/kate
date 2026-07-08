@@ -230,6 +230,14 @@ kinetic claim is held to what the data actually supports rather than to the slow
 the estimator happens to return. This step is usually omitted in the
 MD-compression literature.
 
+`kate analyze` also carries the MSM-community validation tooling reviewers expect:
+`--lag-scan` for implied-timescale convergence (Prinz et al. 2011), `--cktest` for the
+Chapman-Kolmogorov test on PCCA+ metastable sets (a retained MSM passes it while a
+kinetics-corrupting reconstruction fails, which states the thesis in the field's own
+validation language), `--bootstrap N` for block-bootstrap timescale confidence
+intervals, and `--mfpt N` for PCCA+ mean-first-passage-time rates. Every reported
+timescale, MFPT, and rate can therefore carry an error bar.
+
 ## Sanity checks (all pass on CPU)
 
 | original script           | here (packaged)                       | checks |
