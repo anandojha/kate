@@ -17,7 +17,11 @@ Pipeline
    farthest-point sampling in z. This preferentially retains rare and transition states,
    that is, frames of high thermodynamic information. This stage is lossy in the sense
    that frames are discarded; the retained data are not corrupted, a representative
-   subset being chosen.
+   subset being chosen. Coverage sampling over-represents the low-density tails, so each
+   kept frame carries a stationary importance weight equal to the population of its
+   Voronoi cell in base space. The weights restore the empirical measure, so that
+   weighted averages over the kept subset are unbiased estimators of full-ensemble
+   averages; the raw (unweighted) subset is not.
 
 3. Lossless entropy coding
    The kept latents are coded losslessly against the flow's base density N(0, I). The
@@ -27,7 +31,9 @@ Pipeline
 4. The bound
    A divergence between the compressed and original empirical measures bounds the error
    of bounded observables through the Pinsker inequality. This is a static, ensemble
-   guarantee. Kinetic observables are not covered by it, so the MSM transition matrix is
+   guarantee, and it applies to the stationary-reweighted kept subset (stage 2) or,
+   equivalently, to samples drawn from the flow density, not to the raw tail-biased
+   selection. Kinetic observables are not covered by it, so the MSM transition matrix is
    retained separately as the dynamics term. The path-distribution KL is the sum of the
    ensemble term and the transition term.
 
@@ -47,6 +53,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from scipy.special import erf
+from scipy.spatial import cKDTree
 
 from .flow import RealNVP
 from .kinetic_codec import (
@@ -155,6 +162,25 @@ def igfs_select(z: np.ndarray, n_keep: int, seed: int = 0) -> np.ndarray:
     return np.sort(np.array(chosen, dtype=int))
 
 
+def stationary_reweight(z: np.ndarray, kept: np.ndarray) -> np.ndarray:
+    """Importance weights that correct the farthest-point selection bias back to the
+    empirical density.
+
+    Farthest-point sampling maximizes coverage and therefore over-represents the
+    low-density tails of the base measure. Each of the T frames is assigned to its
+    nearest kept frame in base space, and the weight of a kept frame is the population
+    fraction of its Voronoi cell. A weighted average over the kept subset,
+    Sum_i w_i g(x_i), is then an unbiased estimator of the full-ensemble average
+    (1/T) Sum_t g(x_t), so the ensemble-Pinsker guarantee applies to the reweighted
+    subset rather than to the raw, tail-heavy selection. The weights are computed here
+    (where the full base-space set is available) and stored in the artifact; they cost
+    n_keep floats and are used on decode."""
+    tree = cKDTree(np.asarray(z, dtype=np.float64)[kept])
+    _, nearest = tree.query(np.asarray(z, dtype=np.float64), k=1)
+    counts = np.bincount(nearest, minlength=len(kept)).astype(np.float64)
+    return counts / counts.sum()
+
+
 # ============================================================================
 # KATE codec
 # ============================================================================
@@ -174,6 +200,10 @@ class KateArtifact:
     lag: int
     tica: TICA
     centers: np.ndarray
+    # Stationary importance weights for the kept frames (Voronoi-cell populations in base
+    # space). Unbiased ensemble averages weight the kept subset by these; a uniform
+    # fallback keeps older artifacts usable.
+    kept_weights: Optional[np.ndarray] = None
 
 
 class KateCodec:
@@ -212,9 +242,11 @@ class KateCodec:
             z_all, _ = flow.forward(torch.as_tensor(X, dtype=torch.float32))
         z_all = z_all.numpy()
 
-        # Stage 2: information-gain frame selection.
+        # Stage 2: information-gain frame selection, with stationary importance weights
+        # that reweight the tail-heavy coverage subset back to the empirical measure.
         n_keep = max(2, int(self.n_keep_frac * X.shape[0]))
         kept = igfs_select(z_all, n_keep, seed=self.seed)
+        kept_weights = stationary_reweight(z_all, kept)
 
         # Stage 3: lossless entropy coding of the kept latents against N(0, I).
         # Frame selection deliberately retains tail frames with large |z|, so the grid
@@ -243,13 +275,17 @@ class KateCodec:
         return KateArtifact(coded_latents=coded, n_keep=len(kept), dim=dim,
                            L=self.L, zmax=zmax, flow=flow, kept_idx=kept,
                            T_msm=T_msm, counts=C, lag=self.msm_lag, tica=tica,
-                           centers=centers)
+                           centers=centers, kept_weights=kept_weights)
 
     @staticmethod
     def decode_ensemble(ct: KateArtifact) -> np.ndarray:
-        """Reconstruct the kept representative configurations forming the compressed
-        ensemble. The reconstruction is exact up to latent quantization, since the flow
-        inverts exactly."""
+        """Reconstruct the kept representative configurations. The reconstruction is exact
+        up to latent quantization, since the flow inverts exactly.
+
+        The returned frames are the farthest-point coverage subset and therefore
+        over-represent the low-density tails; they do not form an unbiased ensemble on
+        their own. For ensemble averages, weight each frame by ``ct.kept_weights`` (see
+        ``ensemble_average``) or sample directly from the flow density."""
         cum = gaussian_cumfreq(ct.L, ct.zmax)
         levels = decode_iid(ct.coded_latents, ct.n_keep * ct.dim, cum)
         levels = levels.reshape(ct.n_keep, ct.dim)
@@ -258,6 +294,25 @@ class KateCodec:
             x = ct.flow.inverse(torch.as_tensor(z, dtype=torch.float32)).numpy()
         N = ct.dim // 3
         return x.reshape(ct.n_keep, N, 3)
+
+    @staticmethod
+    def ensemble_average(ct: KateArtifact, values: np.ndarray) -> np.ndarray:
+        """Unbiased ensemble average of a per-kept-frame observable.
+
+        ``values`` holds the observable evaluated on the kept frames (shape (n_keep,) or
+        (n_keep, d)). The kept subset is tail-biased by construction, so the average is
+        taken against the stored stationary weights ``ct.kept_weights``; this recovers
+        the full-ensemble average that the ensemble-Pinsker bound refers to. Older
+        artifacts without weights fall back to a uniform average with a warning."""
+        v = np.asarray(values, dtype=np.float64)
+        w = ct.kept_weights
+        if w is None:
+            import warnings
+            warnings.warn("artifact has no kept_weights; ensemble average is the biased "
+                          "uniform mean over the tail-heavy IGFS subset", RuntimeWarning)
+            w = np.full(ct.n_keep, 1.0 / ct.n_keep)
+        w = np.asarray(w, dtype=np.float64)
+        return np.tensordot(w, v, axes=(0, 0))
 
     @staticmethod
     def kinetics(ct: KateArtifact, k=5):
