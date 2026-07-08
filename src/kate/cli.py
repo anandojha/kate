@@ -130,23 +130,23 @@ def cmd_bound(args):
               " k-means centers (see `kate benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
     Cp, Cq = Cp[:n, :n], Cq[:n, :n]
     act = largest_connected_set(Cp + Cq)        # ergodic under the combined counts
-    # The `bound` subcommand is the portable scorer (pure numpy, no torch or
-    # deeptime) and therefore uses the (C+C^T)/2 symmetrized estimator. The
-    # reversible-MLE timescales suitable for publication are produced by
-    # `kate analyze` via deeptime. Both estimators are reversible; the MLE is
-    # the less biased of the two.
-    P, _ = estimate_reversible_T(Cp[np.ix_(act, act)], prefer="cc")
-    Q, _ = estimate_reversible_T(Cq[np.ix_(act, act)], prefer="cc")
+    # Reported numbers route through deeptime's reversible MLE when it is installed
+    # (prefer='auto'), falling back to the pure-numpy (C+C^T)/2 symmetrized estimator so
+    # `bound` still runs without deeptime. The tag records which estimator produced the
+    # figures; the MLE is the less biased of the two and is what the paper reports.
+    P, estP = estimate_reversible_T(Cp[np.ix_(act, act)], prefer="auto")
+    Q, estQ = estimate_reversible_T(Cq[np.ix_(act, act)], prefer="auto")
     r = report_kinetic_fidelity(P, Q, lag=lag, L=L, k=4)
 
     dt = Q_art.dt_strided_ns
+    est_label = estP if estP == estQ else "%s / %s" % (estP, estQ)
     print("=" * 72)
     print("KINETIC FIDELITY  (path-distribution bound; lag=%d frames, L=%d)" % (lag, L))
     print("  artifact (Q)          : %s" % args.artifact)
     print("  reference (P)         : %s" % args.ref)
     print("  active states         : %d" % len(act))
-    print("  MSM estimator         : (C+C^T)/2 symmetrized (portable; `kate analyze` "
-          "gives the deeptime reversible-MLE timescales)")
+    print("  MSM estimator         : %s   (deeptime-mle = reversible MLE, the publishable"
+          " estimator; symmetrized-cc = pure-numpy fallback)" % est_label)
     print("-" * 72)
     print("  ensemble term   D(mu_P||mu_Q)     : %.4e nats   (STATIC bound sees only this)"
           % r["ensemble_kl_nats"])
