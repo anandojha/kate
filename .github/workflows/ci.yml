@@ -31,10 +31,10 @@ jobs:
         run: |
           pytest --cov=kate --cov-report=term-missing --cov-report=xml -q
 
-      - name: Upload coverage artifact
+      - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: codecov/codecov-action@v5
         with:
-          name: coverage-xml
-          path: coverage.xml
-          if-no-files-found: ignore
+          files: ./coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}

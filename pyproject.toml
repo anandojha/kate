@@ -55,7 +55,6 @@ kate = "kate.cli:main"
 Homepage = "https://github.com/anandojha/kate"
 Repository = "https://github.com/anandojha/kate"
 Issues = "https://github.com/anandojha/kate/issues"
-Changelog = "https://github.com/anandojha/kate/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -63,3 +62,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.coverage.run]
+omit = [
+    "src/kate/vampnet_cv.py",
+]
