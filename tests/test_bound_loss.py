@@ -7,7 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from glide.bound_loss import (soft_transition_matrix, transition_term, vamp2_score,
+from kate.bound_loss import (soft_transition_matrix, transition_term, vamp2_score,
                             kinetic_distortion, stationary, SoftStateEncoder, _lagged)
 
 

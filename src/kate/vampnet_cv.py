@@ -47,7 +47,7 @@ except Exception as _e:                              # pragma: no cover
 def _require():
     if not _HAVE_DEEPTIME:
         raise ImportError(
-            "vampnet_cv (T6) needs the kinetics engine: pip install glide[kinetics] "
+            "vampnet_cv (T6) needs the kinetics engine: pip install kate[kinetics] "
             "(deeptime). Original import error: %r" % (_IMPORT_ERR,))
 
 

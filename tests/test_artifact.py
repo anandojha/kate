@@ -3,13 +3,13 @@ without torch); the with-flow path reconstructs the live decoder."""
 import numpy as np
 import pytest
 
-from glide.artifact import save_artifact, load_artifact
+from kate.artifact import save_artifact, load_artifact
 from _synth import toy_artifact
 
 
 def test_roundtrip_without_flow_preserves_kinetics(tmp_path):
     art = toy_artifact(a=0.03, seed=1)
-    p = str(tmp_path / "q.glide")
+    p = str(tmp_path / "q.kate")
     save_artifact(art, p)
     loaded = load_artifact(p, with_flow=False)
     assert loaded.flow_state is None
@@ -23,13 +23,13 @@ def test_roundtrip_without_flow_preserves_kinetics(tmp_path):
 
 def test_with_flow_roundtrip_reconstructs_decoder(tmp_path):
     torch = pytest.importorskip("torch")
-    from glide.flow import RealNVP
+    from kate.flow import RealNVP
     flow = RealNVP(3, hidden=16, n_layers=4)
     art = toy_artifact()
     art.cv_dim = 3
     art.flow_arch = {"dim": 3, "hidden": 16, "n_layers": 4}
     art.flow_state = {k: v.detach().cpu() for k, v in flow.state_dict().items()}
-    p = str(tmp_path / "b.glide")
+    p = str(tmp_path / "b.kate")
     save_artifact(art, p)
     loaded = load_artifact(p, with_flow=True)
     flow2 = loaded.build_flow()

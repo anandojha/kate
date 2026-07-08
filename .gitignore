@@ -27,9 +27,9 @@ dist/
 .eggs/
 pip-wheel-metadata/
 
-# --- GLIDE artifacts / experiment outputs ---
-*.glide/
-*.glide
+# --- KATE artifacts / experiment outputs ---
+*.kate/
+*.kate
 *.epc/
 *.epc
 benchmark_*.png

@@ -1,7 +1,7 @@
 """
-demo_glide.py
+demo_kate.py
 ===========
-End-to-end flow-based GLIDE on synthetic metastable data with known ground truth.
+End-to-end flow-based KATE on synthetic metastable data with known ground truth.
 
 What it demonstrates (the abstract, made concrete and measured):
   - the learned flow REPRODUCES THE ENSEMBLE: the free-energy profile and state
@@ -19,8 +19,8 @@ absolute rates/ratios on this toy.
 
 import numpy as np
 import torch
-from glide.codec import GlideCodec
-from glide.kinetic_codec import kabsch_align
+from kate.codec import KateCodec
+from kate.kinetic_codec import kabsch_align
 
 WELLS = np.array([-2.0, 0.0, 2.0])
 
@@ -64,11 +64,11 @@ def main():
         runs.append(c); ms.append(m)
     T = sum(len(r) for r in runs)
 
-    codec = GlideCodec(n_keep_frac=0.10, flow_layers=10, flow_hidden=64,
+    codec = KateCodec(n_keep_frac=0.10, flow_layers=10, flow_hidden=64,
                      flow_epochs=400, lat_bits=14, tica_lag=10, tica_dim=2,
                      n_states=80, msm_lag=10, seed=0)
     print("=" * 68)
-    print("GLIDE  (synthetic; %d atoms, %d frames, 4 runs)" % (N_ATOMS, T))
+    print("KATE  (synthetic; %d atoms, %d frames, 4 runs)" % (N_ATOMS, T))
     print("=" * 68)
     ct = codec.fit_encode(runs, verbose=True)
 
@@ -109,7 +109,7 @@ def main():
           % (pinsker, abs(p_full - p_samp) <= pinsker + 1e-9))
 
     # ---- EXACT RECONSTRUCTION of kept frames ----
-    rec = GlideCodec.decode_ensemble(ct)
+    rec = KateCodec.decode_ensemble(ct)
     orig_kept = X[ct.kept_idx].reshape(-1, N_ATOMS, 3)
     rmsd = np.sqrt(((rec - orig_kept) ** 2).sum(2).mean(1))
     print("-" * 68)
@@ -139,7 +139,7 @@ def main():
     P = np.array([[0.99, 0.01, 0], [0.01, 0.98, 0.01], [0, 0.01, 0.99]])
     ev = np.sort(np.real(np.linalg.eigvals(P)))[::-1]
     gt = -1.0 / np.log(ev[1:3])
-    its = GlideCodec.kinetics(ct, k=4)
+    its = KateCodec.kinetics(ct, k=4)
     print("-" * 68)
     print("KINETICS  (retained MSM transition matrix -- the dynamics term)")
     print("  ground-truth slow timescales   : %s frames" % np.round(gt, 1))

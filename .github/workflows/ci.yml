@@ -29,7 +29,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          pytest --cov=glide --cov-report=term-missing --cov-report=xml -q
+          pytest --cov=kate --cov-report=term-missing --cov-report=xml -q
 
       - name: Upload coverage artifact
         if: matrix.python-version == '3.12'

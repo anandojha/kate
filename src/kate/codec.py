@@ -1,7 +1,7 @@
 """
-GLIDE Codec for Kinetics-Preserving Compression
+KATE Codec for Kinetics-Preserving Compression
 ===============================================
-This module implements the flow-based GLIDE codec, which compresses molecular
+This module implements the flow-based KATE codec, which compresses molecular
 configurations while preserving kinetic observables.
 
 Pipeline
@@ -156,11 +156,11 @@ def igfs_select(z: np.ndarray, n_keep: int, seed: int = 0) -> np.ndarray:
 
 
 # ============================================================================
-# GLIDE codec
+# KATE codec
 # ============================================================================
 
 @dataclass
-class GlideArtifact:
+class KateArtifact:
     coded_latents: bytes          # entropy-coded base-space latents of the kept frames
     n_keep: int
     dim: int
@@ -176,7 +176,7 @@ class GlideArtifact:
     centers: np.ndarray
 
 
-class GlideCodec:
+class KateCodec:
     def __init__(self, n_keep_frac=0.1, flow_layers=10, flow_hidden=64,
                  flow_epochs=200, lat_bits=12, zmax=5.0,
                  tica_lag=10, tica_dim=2, n_states=80, msm_lag=10, seed=0):
@@ -193,7 +193,7 @@ class GlideCodec:
         self.msm_lag = msm_lag
         self.seed = seed
 
-    def fit_encode(self, runs: List[np.ndarray], verbose=True) -> GlideArtifact:
+    def fit_encode(self, runs: List[np.ndarray], verbose=True) -> KateArtifact:
         # Align and flatten the input runs.
         ref = None
         aligned = []
@@ -240,13 +240,13 @@ class GlideCodec:
         C = count_matrix(labels, self.n_states, self.msm_lag)
         T_msm, _ = transition_matrix(C, reversible=True)
 
-        return GlideArtifact(coded_latents=coded, n_keep=len(kept), dim=dim,
+        return KateArtifact(coded_latents=coded, n_keep=len(kept), dim=dim,
                            L=self.L, zmax=zmax, flow=flow, kept_idx=kept,
                            T_msm=T_msm, counts=C, lag=self.msm_lag, tica=tica,
                            centers=centers)
 
     @staticmethod
-    def decode_ensemble(ct: GlideArtifact) -> np.ndarray:
+    def decode_ensemble(ct: KateArtifact) -> np.ndarray:
         """Reconstruct the kept representative configurations forming the compressed
         ensemble. The reconstruction is exact up to latent quantization, since the flow
         inverts exactly."""
@@ -260,7 +260,7 @@ class GlideCodec:
         return x.reshape(ct.n_keep, N, 3)
 
     @staticmethod
-    def kinetics(ct: GlideArtifact, k=5):
+    def kinetics(ct: KateArtifact, k=5):
         active = largest_connected_set(ct.counts)
         Tc, _ = transition_matrix(ct.counts[np.ix_(active, active)], reversible=True)
         return implied_timescales(Tc, ct.lag, k)

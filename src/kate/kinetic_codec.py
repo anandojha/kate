@@ -13,7 +13,7 @@ A trajectory is encoded as three components within a single artifact.
 A linear slow-mode transform is applied, using TICA for kinetics and full-rank
 whitening for reconstruction. The whitening is an exactly invertible linear
 normalizing flow onto a Gaussian reference, so that a KL bound is preserved
-under it (the Gaussian-reference form of the GLIDE guarantee). A
+under it (the Gaussian-reference form of the KATE guarantee). A
 Boltzmann-generator-style flow may be substituted through the `Transform`
 interface to remove the Gaussian assumption.
 
@@ -363,7 +363,7 @@ class WhiteningTransform(Transform):
 
     The map is an exactly invertible linear transform, equivalent to a linear
     normalizing flow, under which the KL bound is preserved (the Gaussian-reference
-    form of GLIDE). For large 3N a low-rank variant may be selected by setting
+    form of KATE). For large 3N a low-rank variant may be selected by setting
     `rank`, in which case reconstruction becomes lossy beyond quantization."""
     rank: Optional[int] = None
     mean_: np.ndarray = field(default=None, repr=False)
@@ -429,7 +429,7 @@ class TICA:
         # collective variables, and therefore the seeded flow and IGFS selection,
         # deterministic and identical between the batch fit() and the streaming
         # finalize(), whose covariances differ only by floating-point roundoff. The
-        # streaming GLIDE pipeline therefore reproduces the in-memory result.
+        # streaming KATE pipeline therefore reproduces the in-memory result.
         cols = np.arange(evecs.shape[1])
         signs = np.sign(evecs[np.argmax(np.abs(evecs), axis=0), cols])
         signs[signs == 0] = 1.0
@@ -590,7 +590,7 @@ def estimate_reversible_T(C: np.ndarray, prefer: str = "auto"
 
     The deeptime reversible maximum-likelihood estimator is preferred, with a
     fallback to the (C + C^T)/2 symmetrization when deeptime is unavailable or its
-    MLE fails. This is the estimator that backs the reported GLIDE timescales and
+    MLE fails. This is the estimator that backs the reported KATE timescales and
     the path bound.
 
     The returned matrix has the same shape as C. Any state that deeptime drops from

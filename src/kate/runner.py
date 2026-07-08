@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """
-Flow-Based GLIDE Trajectory Compression Runner
+Flow-Based KATE Trajectory Compression Runner
 ==============================================
-This module provides the execution backend for ``glide compress``, applying
-flow-based GLIDE to molecular-dynamics trajectories supplied either as in-memory
+This module provides the execution backend for ``kate compress``, applying
+flow-based KATE to molecular-dynamics trajectories supplied either as in-memory
 arrays or as DCD files. Dimensionality reduction to a small set of TICA collective
 variables precedes flow training, which keeps the procedure tractable for systems
 of size 3N of order 5000.
@@ -23,11 +23,11 @@ Three entry points share a common post-collective-variable core, ``_assemble_art
     estimation, and a final pass that reads only the kept frames for the residual.
     Streaming TICA reproduces batch TICA exactly, since cross-chunk lagged pairs are
     retained.
-  * ``run_glide(top, dcd[, streaming=True])`` provides the DCD loader for both paths.
+  * ``run_kate(top, dcd[, streaming=True])`` provides the DCD loader for both paths.
 
 Kinetic bound
 -------------
-The path-distribution bound is incorporated directly. For GLIDE the retained MSM Q
+The path-distribution bound is incorporated directly. For KATE the retained MSM Q
 equals the full-data reference P, so the transition term vanishes by construction.
 The full-atom residual stage recovers the fast modes discarded by TICA.
 """
@@ -134,7 +134,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     Tm_act, msm_estimator = estimate_reversible_T(C[np.ix_(act, act)])
     its = implied_timescales(Tm_act, lag, 5)
     its_ns = its * dt_strided_ns
-    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # GLIDE: Q == P
+    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # KATE: Q == P
 
     # Full-atom residual stage: a method-agnostic linear decoder combined with a
     # dithered residual. A linear collective-variable-to-coordinate decoder, fit on the
@@ -332,7 +332,7 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", features="c
                         dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                         entropy="gaussian", flow_kind="realnvp",
                         predictive_kind="gru") -> Tuple[Artifact, dict]:
-    """Run in-memory, run-aware flow-based GLIDE on a list of coordinate arrays.
+    """Run in-memory, run-aware flow-based KATE on a list of coordinate arrays.
 
     Each input array has shape (T_i, N, 3) in nanometres. ``cv`` selects the
     collective-variable method: 'tica' (linear, the default) or 'vampnet'. ``features``
@@ -366,7 +366,7 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
                        dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                        entropy="gaussian", flow_kind="realnvp",
                        predictive_kind="gru") -> Tuple[Artifact, dict]:
-    """Run out-of-core flow-based GLIDE over a stream of coordinate chunks.
+    """Run out-of-core flow-based KATE over a stream of coordinate chunks.
 
     ``chunk_factory()`` returns a fresh iterator of coordinate chunks of shape
     (T_c, N, 3), for example from ``md.iterload``. The trajectory is treated as a single
@@ -436,12 +436,12 @@ def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_
                               predictive_kind=predictive_kind)
 
 
-def run_glide(top: str, dcd: str, *, stride=10, cv="tica", features="cartesian", cv_dim=6,
+def run_kate(top: str, dcd: str, *, stride=10, cv="tica", features="cartesian", cv_dim=6,
             keep_frac=0.10, epochs=300, nstates=200, lag_ns=5.0, dt_ps=100.0, lat_bits=14,
             n_bits=4, seed=0, streaming=False, chunk=2000, entropy="gaussian",
             flow_kind="realnvp", predictive_kind="gru",
             verbose=True) -> Tuple[Artifact, dict]:
-    """Load a DCD trajectory and run flow-based GLIDE.
+    """Load a DCD trajectory and run flow-based KATE.
 
     The trajectory comprises the heavy atoms of a solvent-stripped system. ``cv`` is
     'tica' (the default) or 'vampnet'. ``features`` is 'cartesian' (the default) or
@@ -459,7 +459,7 @@ def run_glide(top: str, dcd: str, *, stride=10, cv="tica", features="cartesian",
     lag = max(1, int(round(lag_ns / dt_strided_ns)))
     if verbose:
         print("=" * 70)
-        print("GLIDE on %s  (stride %d -> %.3f ns/frame, lag %d frames = %.2f ns; cv=%s%s)"
+        print("KATE on %s  (stride %d -> %.3f ns/frame, lag %d frames = %.2f ns; cv=%s%s)"
               % (dcd, stride, dt_strided_ns, lag, lag * dt_strided_ns, cv,
                  ", STREAMING" if streaming else ""))
         print("=" * 70)
@@ -542,20 +542,20 @@ def print_report(report: dict) -> None:
     _est = r.get("msm_estimator", "symmetrized-cc")
     print("  MSM estimator         : %s" % (
         "deeptime reversible MLE (publishable)" if _est == "deeptime-mle"
-        else "(C+C^T)/2 symmetrized -- deeptime absent; install glide[kinetics] for the MLE"))
+        else "(C+C^T)/2 symmetrized -- deeptime absent; install kate[kinetics] for the MLE"))
     print("  implied timescales    : %s ns" % np.round(r["implied_timescales_ns"], 1))
     print("KINETIC BOUND (path-distribution; retained Q vs reference P = full-data MSM)")
     print("  ensemble term         : %.3e nats" % kin["ensemble_kl_nats"])
-    print("  transition term       : %.3e nats/step  (~0 by construction: GLIDE retains the MSM)"
+    print("  transition term       : %.3e nats/step  (~0 by construction: KATE retains the MSM)"
           % kin["transition_kl_rate_nats_per_step"])
     print("  Pinsker pair bound    : %.3e   (the kinetic-observable guarantee)"
           % kin["pinsker_pair_bound"])
-    print("  NOTE: the contrast vs other compressors is `glide benchmark`; here Q==P so ~0.")
+    print("  NOTE: the contrast vs other compressors is `kate benchmark`; here Q==P so ~0.")
     print("=" * 70)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="flow-based GLIDE on a DCD (glide compress backend)")
+    ap = argparse.ArgumentParser(description="flow-based KATE on a DCD (kate compress backend)")
     ap.add_argument("top"); ap.add_argument("dcd")
     ap.add_argument("--stride", type=int, default=10)
     ap.add_argument("--cv-dim", type=int, default=6)
@@ -568,9 +568,9 @@ def main():
     ap.add_argument("--n-bits", type=int, default=4)
     ap.add_argument("--streaming", action="store_true", help="out-of-core (T5)")
     ap.add_argument("--chunk", type=int, default=2000)
-    ap.add_argument("-o", "--out", default=None, help="write artifact to this .glide path")
+    ap.add_argument("-o", "--out", default=None, help="write artifact to this .kate path")
     a = ap.parse_args()
-    art, report = run_glide(a.top, a.dcd, stride=a.stride, cv_dim=a.cv_dim,
+    art, report = run_kate(a.top, a.dcd, stride=a.stride, cv_dim=a.cv_dim,
                           keep_frac=a.keep_frac, epochs=a.epochs, nstates=a.nstates,
                           lag_ns=a.lag_ns, dt_ps=a.dt_ps, lat_bits=a.lat_bits,
                           n_bits=a.n_bits, streaming=a.streaming, chunk=a.chunk)

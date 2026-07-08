@@ -15,7 +15,7 @@ closed-form inverse.
 
 RealNVP (flow.RealNVP) remains the reproducible default. SplineFlow is a drop-in
 alternative exposing the same forward, inverse, log_prob, sample, and fit interface,
-selected via ``glide compress --flow spline``.
+selected via ``kate compress --flow spline``.
 
 Neural spline flows, masked autoregressive flows, and equivariant flows constitute
 prior art and are cited rather than claimed; the architecture is not the principal
@@ -245,7 +245,7 @@ class SplineFlow(nn.Module):
 
 
 if __name__ == "__main__":
-    # Invertibility and density self-test, mirroring glide.flow.
+    # Invertibility and density self-test, mirroring kate.flow.
     torch.manual_seed(0)
     rng = np.random.default_rng(0)
     n = 6000

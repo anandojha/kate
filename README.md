@@ -1,29 +1,29 @@
-# glide - kinetics-preserving compression of MD trajectories
+# kate - kinetics-preserving compression of MD trajectories
 
-**GLIDE** = **G**enerative **L**atent **I**nvertible **D**ynamics-preserving **E**ncoder. It is a normalizing-flow codec whose fidelity bound covers the kinetics in addition to the ensemble.
+**KATE** = **K**inetic-**A**ware **T**rajectory **E**ncoder. It is a normalizing-flow codec whose fidelity bound covers the kinetics in addition to the ensemble.
 
-[![CI](https://github.com/anandojha/glide/actions/workflows/ci.yml/badge.svg)](https://github.com/anandojha/glide/actions/workflows/ci.yml)
+[![CI](https://github.com/anandojha/kate/actions/workflows/ci.yml/badge.svg)](https://github.com/anandojha/kate/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![coverage 99%](https://img.shields.io/badge/coverage-99%25-brightgreen.svg)](#tests)
 
 > **Thesis.** Ensemble-preserving compression does not preserve kinetics. Two
 > ensembles with identical stationary distributions can have arbitrarily different
-> rates. GLIDE adds a path-distribution (trajectory) bound,
+> rates. KATE adds a path-distribution (trajectory) bound,
 > `KL(path) = ensemble term + transition term`, so that kinetic observables
 > (timescales, MFPTs, k_on/k_off) are covered in addition to static ones. The
 > contribution is the kinetic bound rather than the architecture.
 
 This repository packages a tested research codebase as an installable library and CLI: a
 classical analysis-native codec, a from-scratch RealNVP normalizing flow, the
-flow-based GLIDE codec, the kinetic path bound, and a
+flow-based KATE codec, the kinetic path bound, and a
 [deeptime](https://github.com/deeptime-ml/deeptime) MSM wrapper. See
 [`docs/REVIEW.md`](docs/REVIEW.md) for the prior work and baselines this builds on and
 how it differs.
 
 ```bash
-pip install git+https://github.com/anandojha/glide.git          # core
-pip install "glide[kinetics] @ git+https://github.com/anandojha/glide.git"  # + deeptime
+pip install git+https://github.com/anandojha/kate.git          # core
+pip install "kate[kinetics] @ git+https://github.com/anandojha/kate.git"  # + deeptime
 ```
 
 ## What is new
@@ -45,15 +45,15 @@ MSM-as-entropy-coder, and flow-as-density (Boltzmann Generators) are all prior a
 > resolution accounting, and every measured result with its limitations.
 
 Validated on the 25 µs NTL9 fast-folder, scored only on the kinetically resolved band
-(`glide analyze --resolution`; the slow folding mode is sampling-limited and is not scored;
+(`kate analyze --resolution`; the slow folding mode is sampling-limited and is not scored;
 see honesty constraints). All numbers are empirical, with the limits stated.
 
 - The contrast ([`docs/ntl9_contrast_resolved.png`](docs/ntl9_contrast_resolved.png)).
-  To preserve the resolved kinetics to <1 % timescale error, GLIDE needs ~12 bits/frame,
+  To preserve the resolved kinetics to <1 % timescale error, KATE needs ~12 bits/frame,
   whereas general-purpose error-bounded compressors need ~840 (SZ3) - 1400 (ZFP), a ~70-120×
   rate gap. When pushed to aggressive compression, SZ3/ZFP collapse the kinetics
   (SZ3 reaches 95 % timescale error at 331 bits/frame). These methods spend bits on bounded all-atom
-  error, blind to which coordinates carry the slow dynamics, whereas GLIDE's bound targets the
+  error, blind to which coordinates carry the slow dynamics, whereas KATE's bound targets the
   kinetics. The objectives differ; the axis reported is the rate needed for a given kinetic
   fidelity, which is what is plotted.
 - Predictive (T9) entropy coding ([`docs/ntl9_temporal_redundancy.png`](docs/ntl9_temporal_redundancy.png),
@@ -74,7 +74,7 @@ see honesty constraints). All numbers are empirical, with the limits stated.
   coordinates/QoI already. The genuine novelty is the observable-space (KL/Pinsker)
   bound, specifically the kinetic (path) bound.
 - The ensemble (static) Pinsker bound does not cover kinetic observables.
-  Only the path-distribution bound (`glide.pathbound`) does. The `bound` report
+  Only the path-distribution bound (`kate.pathbound`) does. The `bound` report
   labels which term covers what.
 - "Exact / invertible" is qualified: the flow is an exact diffeomorphism and kept
   frames reconstruct exactly up to quantization, but information-gain frame
@@ -92,15 +92,15 @@ see honesty constraints). All numbers are empirical, with the limits stated.
 - Not a pure-compression winner. On rate, all-atom RMSD, speed, and maturity, the
   dedicated compressors win: SZ3 has an MD-specific spatio-temporal predictor, a hard
   per-atom error bound, and zstd; ZFP has O(1) random access; MDZip's autoencoder stores
-  ~one small latent per whole frame and reconstructs all atoms (GLIDE reconstructs
-  coordinates only for the ~10% kept frames). GLIDE's narrow advantage is that it is the
+  ~one small latent per whole frame and reconstructs all atoms (KATE reconstructs
+  coordinates only for the ~10% kept frames). KATE's narrow advantage is that it is the
   only one that retains kinetics (the MSM), ships a path-distribution bound on
   kinetic observables, and is analysis-native (the file is the kinetic model).
 - MDZip is a coordinate-RMSD method, not an ensemble-preserving one; its loss is
   `sqrt(mean((recon−x)²))`. That such a method can damage kinetics is a correctly
   diagnosed hypothesis, but it is empirical and not yet measured here, so it is not asserted.
 - The certified kinetics currently run through the hand-rolled `(C+Cᵀ)/2` estimator,
-  not deeptime's reversible MLE (`runner.py`, `benchmark.py`, `glide bound`). That
+  not deeptime's reversible MLE (`runner.py`, `benchmark.py`, `kate bound`). That
   estimator is reversible but statistically biased; routing the reported numbers through
   `deeptime` MLE is the top open fix. See [`docs/REVIEW.md`](docs/REVIEW.md) for the full
   internal physics/competitive audit and the prioritized roadmap.
@@ -125,21 +125,21 @@ Provenance boundary:
 **One-line install (conda):**
 
 ```bash
-git clone https://github.com/anandojha/glide.git
-cd glide
-bash install_glide.sh
+git clone https://github.com/anandojha/kate.git
+cd kate
+bash install_kate.sh
 ```
 
-This creates a fresh conda environment named `glide`, installs all dependencies,
-builds and installs GLIDE, and runs the test suite to verify.
+This creates a fresh conda environment named `kate`, installs all dependencies,
+builds and installs KATE, and runs the test suite to verify.
 
 **Manual (conda):**
 
 ```bash
-git clone https://github.com/anandojha/glide.git
-cd glide
-conda create -n glide python=3.11 -y
-conda activate glide
+git clone https://github.com/anandojha/kate.git
+cd kate
+conda create -n kate python=3.11 -y
+conda activate kate
 conda install -c conda-forge mdtraj deeptime matplotlib -y
 pip install torch
 pip install ".[kinetics,test]"
@@ -148,13 +148,13 @@ pip install ".[kinetics,test]"
 **pip only:**
 
 ```bash
-pip install git+https://github.com/anandojha/glide.git                       # core
-pip install "glide[kinetics] @ git+https://github.com/anandojha/glide.git"    # + deeptime
+pip install git+https://github.com/anandojha/kate.git                       # core
+pip install "kate[kinetics] @ git+https://github.com/anandojha/kate.git"    # + deeptime
 ```
 
 `torch` is a core dependency (the flow requires it). `deeptime` is an optional
-`[kinetics]` extra: `glide compress`, `decompress`, and `bound` run without it; only
-`analyze`, `benchmark`, and the VAMPnet CV path import it. Importing `glide` pulls in
+`[kinetics]` extra: `kate compress`, `decompress`, and `bound` run without it; only
+`analyze`, `benchmark`, and the VAMPnet CV path import it. Importing `kate` pulls in
 neither torch nor deeptime eagerly, as enforced by `tests/test_no_eager_torch.py`.
 
 ## Testing
@@ -166,20 +166,20 @@ python -m pytest tests/ -v
 ## Quick start
 
 ```bash
-conda activate glide
-glide compress topology.pdb trajectory.dcd -o run.glide   # compress a trajectory
-glide analyze run.glide --resolution                      # timescales + what is resolved
-glide bound run.glide reference.glide                     # kinetic-fidelity report
+conda activate kate
+kate compress topology.pdb trajectory.dcd -o run.kate   # compress a trajectory
+kate analyze run.kate --resolution                      # timescales + what is resolved
+kate bound run.kate reference.kate                     # kinetic-fidelity report
 ```
 
 ## The target: one end-to-end tool
 
 ```
-glide compress   TOP DCD  -> artifact    align -> CV/flow -> IGFS -> entropy code + retained MSM
-glide decompress artifact -> trajectory  flow inverse for kept frames; full-atom residual stage
-glide analyze    artifact -> kinetics    deeptime MSM: timescales, lag scan, Bayesian bars, --resolution
-glide bound      artifact ref -> report  ensemble term, transition term, Pinsker pair/path bounds
-glide benchmark  TOP DCD  -> table+plot  GLIDE vs MDZip vs SZ3 vs ZFP, each scored by the path bound
+kate compress   TOP DCD  -> artifact    align -> CV/flow -> IGFS -> entropy code + retained MSM
+kate decompress artifact -> trajectory  flow inverse for kept frames; full-atom residual stage
+kate analyze    artifact -> kinetics    deeptime MSM: timescales, lag scan, Bayesian bars, --resolution
+kate bound      artifact ref -> report  ensemble term, transition term, Pinsker pair/path bounds
+kate benchmark  TOP DCD  -> table+plot  KATE vs MDZip vs SZ3 vs ZFP, each scored by the path bound
 ```
 
 Module map: `compress = runner.py/codec.py`, `decompress = codec.py (+T4 residual)`,
@@ -187,7 +187,7 @@ Module map: `compress = runner.py/codec.py`, `decompress = codec.py (+T4 residua
 The artifact stores the run-aware all-frame dtraj and k-means centers (not just one
 count matrix), so `analyze`/`benchmark` can re-estimate the MSM at any lag.
 
-`glide analyze --resolution` adds a kinetic-resolution report: per dynamical process,
+`kate analyze --resolution` adds a kinetic-resolution report: per dynamical process,
 the Bayesian timescale, its 95% confidence interval, the relative uncertainty, and the
 number of independent events the trajectory contains (~ T_total / t_i). A process is
 flagged resolved only if its Bayesian error is small and it has enough events,
@@ -202,11 +202,11 @@ MD-compression literature.
 
 | original script           | here (packaged)                       | checks |
 |---------------------------|---------------------------------------|--------|
-| `python glide_flow.py`      | `python -m glide.flow`                  | invertibility ~1e-6, density ~1, wells recovered |
+| `python kate_flow.py`      | `python -m kate.flow`                  | invertibility ~1e-6, density ~1, wells recovered |
 | `python demo_pathbound.py`| `python examples/demo_pathbound.py`   | ensemble term ~0 for both chains; transition term large for the ensemble-only chain |
 | `python demo_kinetic_codec.py` | `python examples/demo_kinetic_codec.py` | range coder hits the MSM entropy-rate floor; kinetics recovered |
-| `python kinetics_deeptime.py` | `python -m glide.kinetics_deeptime`  | reversible MLE MSM, lag scan, Bayesian error bars (needs `[kinetics]`) |
-| `python demo_glide.py`      | `python examples/demo_glide.py`         | full flow-based pipeline + measured bound |
+| `python kinetics_deeptime.py` | `python -m kate.kinetics_deeptime`  | reversible MLE MSM, lag scan, Bayesian error bars (needs `[kinetics]`) |
+| `python demo_kate.py`      | `python examples/demo_kate.py`         | full flow-based pipeline + measured bound |
 
 Run the test suite with `pytest` (torch/deeptime-dependent tests auto-skip if those
 libraries are absent).
@@ -220,16 +220,16 @@ synthetic demo's slow timescales are under-resolved (the leading TICA mode on ra
 Cartesian is spurious). This is expected and is the reason deeptime is
 the published path: implied timescales are a lower bound that converges upward with
 lag (Prinz et al.), so the rigorous kinetics come from a deeptime reversible-MLE
-MSM and lag scan (`glide analyze`, version-stable) and, for nonlinear slow CVs, from
+MSM and lag scan (`kate analyze`, version-stable) and, for nonlinear slow CVs, from
 VAMPnets [T6] on ligand-pocket contacts (not raw Cartesian). The bound, the
-flow, the GLIDE pipeline, and the thermodynamics (state populations) are unaffected.
+flow, the KATE pipeline, and the thermodynamics (state populations) are unaffected.
 
 ## Build targets (all implemented)
 
 Classical / scaling track:
-- **T1 [x]** path bound wired into the runner + `glide bound` (pure-numpy contrast scorer)
-- **T2 [x]** production kinetics via deeptime (`glide analyze`: lag scan, Bayesian bars)
-- **T3 [x]** baseline-comparison harness (`glide benchmark`, the contrast figure)
+- **T1 [x]** path bound wired into the runner + `kate bound` (pure-numpy contrast scorer)
+- **T2 [x]** production kinetics via deeptime (`kate analyze`: lag scan, Bayesian bars)
+- **T3 [x]** baseline-comparison harness (`kate benchmark`, the contrast figure)
 - **T4 [x]** full-atom reconstruction (`decompress --full-atom`, per-state dithered residual)
 - **T5 [x]** scale to 419k→1M frames (`compress --streaming`, streaming TICA, multi-pass)
 
@@ -254,7 +254,7 @@ invertible and the bound intact, with no lossy CNN autoencoder):
   static per-frame coding at the 0.5 ns storage stride (35→20 bits/frame, 8 CVs), and
   still ~14 bits at 1 ns. This corrects an earlier conservative hedge ("gain may be
   modest, frames are decorrelated at ~100 ps"): that holds for fast Cartesian modes, but
-  GLIDE compresses slow CVs, whose µs timescales keep them strongly autocorrelated
+  KATE compresses slow CVs, whose µs timescales keep them strongly autocorrelated
   (ρ≈0.98) even at storage spacing, so the temporal redundancy the predictor exploits is
   large and real.
   Observable-error half ([`docs/ntl9_t9_gate.png`](docs/ntl9_t9_gate.png)): scored on
@@ -273,7 +273,7 @@ invertible and the bound intact, with no lossy CNN autoencoder):
   autoregressive context models, Ballé et al., ICLR 2018 (arXiv:1802.01436); Minnen
   et al., NeurIPS 2018 (arXiv:1809.02736).
 - **T10 [x] (mechanism shown on synthetic)** the kinetic path-bound made
-  differentiable so it can serve as a training loss (`glide.bound_loss`): a VAMPnet-style
+  differentiable so it can serve as a training loss (`kate.bound_loss`): a VAMPnet-style
   soft state assignment makes the soft MSM, and the path-bound transition term
   `h(P‖Q)`, a smooth function of the network, so `loss = rate + λ·h(P‖Q)` trains a
   compressor to spend bits where they matter for kinetics rather than for coordinate error.
@@ -305,12 +305,12 @@ those libraries are absent.
 ## Repository layout
 
 ```
-src/glide/        flow.py codec.py kinetic_codec.py pathbound.py kinetics_deeptime.py
+src/kate/        flow.py codec.py kinetic_codec.py pathbound.py kinetics_deeptime.py
                 inspect_traj.py runner.py  (+ artifact.py cli.py __main__.py
                 benchmark.py baselines.py temporal_prior.py vampnet_cv.py spline_flow.py
                 predictive_coder.py bound_loss.py)
 tests/          pytest suite (torch/deeptime tests use importorskip)
-examples/       demo_pathbound.py demo_kinetic_codec.py demo_glide.py demo_bound_loss.py
+examples/       demo_pathbound.py demo_kinetic_codec.py demo_kate.py demo_bound_loss.py
                 (the §2 checks)
 docs/           REVIEW.md (physics + competitive audit), METHODS.md, NTL9 figures
 ```
@@ -326,13 +326,13 @@ subprocesses for the `benchmark` contrast. The
 trypsin-benzamidine trajectory (`~419,213` frames, 100 ps/frame, solvent-stripped,
 nm) resides on the cluster, not in this repository.
 
-The wrappers (`glide.baselines`) are pointed at the tools via environment variables:
+The wrappers (`kate.baselines`) are pointed at the tools via environment variables:
 
 | env var | points to |
 |---|---|
-| `GLIDE_SZ3_BIN` | the SZ3 compressor executable (e.g. `.../SZ3/build/tools/sz3/sz3`) |
-| `GLIDE_ZFP_BIN` | the ZFP compressor executable (e.g. `.../zfp/build/bin/zfp`) |
-| `GLIDE_MDZIP_DIR` | the MDZip repo directory (its own torch/lightning env) |
+| `KATE_SZ3_BIN` | the SZ3 compressor executable (e.g. `.../SZ3/build/tools/sz3/sz3`) |
+| `KATE_ZFP_BIN` | the ZFP compressor executable (e.g. `.../zfp/build/bin/zfp`) |
+| `KATE_MDZIP_DIR` | the MDZip repo directory (its own torch/lightning env) |
 
 If unset (or the tool is not on `PATH`), the wrapper raises a clear
 `BaselineUnavailable` and the method is skipped; the local pseudo-baselines

@@ -8,8 +8,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from glide.spline_flow import SplineFlow
-from glide.flow import RealNVP
+from kate.spline_flow import SplineFlow
+from kate.flow import RealNVP
 from _synth import metastable_coords
 
 
@@ -68,14 +68,14 @@ def test_spline_density_competitive_with_realnvp():
 
 
 def test_compress_flow_spline_end_to_end(tmp_path):
-    from glide.runner import compress_trajectory
-    from glide.artifact import save_artifact, load_artifact
-    from glide.cli import main
+    from kate.runner import compress_trajectory
+    from kate.artifact import save_artifact, load_artifact
+    from kate.cli import main
     coords = metastable_coords(n_steps=1500, n_atoms=6, seed=0)
     art, rep = compress_trajectory([coords], flow_kind="spline", cv_dim=2, keep_frac=0.1,
                                    epochs=40, nstates=30, lag=10, seed=0, verbose=False)
     assert art.flow_kind == "spline"
-    p = str(tmp_path / "s.glide")
+    p = str(tmp_path / "s.kate")
     save_artifact(art, p)
     loaded = load_artifact(p, with_flow=True)
     assert loaded.flow_kind == "spline"

@@ -7,10 +7,10 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from glide.runner import compress_trajectory
-from glide.artifact import save_artifact
-from glide.cli import main
-from glide.kinetic_codec import kabsch_align
+from kate.runner import compress_trajectory
+from kate.artifact import save_artifact
+from kate.cli import main
+from kate.kinetic_codec import kabsch_align
 from _synth import metastable_coords
 
 
@@ -31,7 +31,7 @@ def test_full_atom_roundtrip_and_beats_cv_only(tmp_path):
     aligned, _ = kabsch_align(coords, art.align_ref)
     Xkept = aligned.reshape(len(coords), -1)[art.kept_idx]
 
-    p = str(tmp_path / "e.glide"); save_artifact(art, p)
+    p = str(tmp_path / "e.kate"); save_artifact(art, p)
 
     # full-atom reconstruction
     out_full = str(tmp_path / "full.npy")

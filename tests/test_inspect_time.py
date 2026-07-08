@@ -6,7 +6,7 @@ import os
 import numpy as np
 import pytest
 
-from glide import inspect_traj as it
+from kate import inspect_traj as it
 
 
 def _save(tmp, ext, dt_ps, n=150, n_atoms=5):

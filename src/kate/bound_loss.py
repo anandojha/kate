@@ -30,7 +30,7 @@ Scope
 The quantity defined here is a differentiable surrogate of the bound, combining soft
 states with a regression transition matrix, used as a loss. The reported, certified
 kinetics are obtained separately from the deeptime reversible-maximum-likelihood MSM
-together with the path bound evaluated on hard states (glide.pathbound, glide.analyze).
+together with the path bound evaluated on hard states (kate.pathbound, kate.analyze).
 Whether training on the bound improves upon training on mean-squared error is an
 empirical question, measured rather than assumed (see the examples and the T10
 experiment).

@@ -1,16 +1,16 @@
 """
-Kinetic Path-Distribution Bound for the GLIDE Guarantee
+Kinetic Path-Distribution Bound for the KATE Guarantee
 =======================================================
 Background
 ----------
-This module provides the kinetic component of the GLIDE guarantee: a divergence
+This module provides the kinetic component of the KATE guarantee: a divergence
 defined on the trajectory (path) distribution rather than only on the static
 ensemble. It extends the analytic guarantee to kinetic observables, which the
 static ensemble Pinsker bound does not cover.
 
 Motivation
 ----------
-The ensemble bound implemented in glide.py controls observables of single
+The ensemble bound implemented in kate.py controls observables of single
 configurations,
 
     |E_P[f] - E_Q[f]| <= sqrt( D(mu_P || mu_Q) / 2 )    for f in [0, 1],
@@ -48,11 +48,11 @@ Transition fluxes and counts, which determine rates, are exactly such pairwise
 observables, so this constitutes a kinetic guarantee; the ensemble term alone does
 not.
 
-Role within GLIDE
+Role within KATE
 ----------------
-GLIDE retains the MSM transition matrix, so for the GLIDE artifact itself Q = P on
+KATE retains the MSM transition matrix, so for the KATE artifact itself Q = P on
 the retained dynamics and the transition term is approximately zero by
-construction, i.e. GLIDE preserves kinetics. The principal role of this module is
+construction, i.e. KATE preserves kinetics. The principal role of this module is
 to serve as the reference measure for the contrast experiment: given any
 compressor's reconstruction, its MSM Q is re-estimated at the same discretization,
 and the ensemble term D(mu_P || mu_Q) is reported against the transition term. An

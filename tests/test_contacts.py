@@ -9,8 +9,8 @@ import pytest
 
 pytest.importorskip("torch")
 
-from glide.runner import compress_trajectory
-from glide.artifact import save_artifact, load_artifact
+from kate.runner import compress_trajectory
+from kate.artifact import save_artifact, load_artifact
 from _synth import metastable_coords
 
 
@@ -23,7 +23,7 @@ def test_contacts_featurization_round_trip(tmp_path):
     its = rep["implied_timescales_ns"]
     assert np.all(np.isfinite(its[:2])) and its[0] >= its[1] > 0     # valid kinetics
     # save/load + full-atom residual round-trips losslessly (featurization-agnostic recon)
-    p = str(tmp_path / "c.glide")
+    p = str(tmp_path / "c.kate")
     save_artifact(art, p)
     loaded = load_artifact(p, with_flow=False)
     assert loaded.residual is not None

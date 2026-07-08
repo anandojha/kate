@@ -314,7 +314,7 @@ def format_mfpt(report):
 def msm_for_pathbound(dtrajs, lag, reversible=True):
     """Return (transition_matrix, active_state_indices) for the path bound.
 
-    The result is intended for glide_pathbound.report_kinetic_fidelity. A fair
+    The result is intended for kate_pathbound.report_kinetic_fidelity. A fair
     comparison of two compressors requires discretizing both against the same
     k-means centers, estimating each MSM here, and mapping both transition
     matrices onto a common active-state index set before calling the path bound

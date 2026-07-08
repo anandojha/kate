@@ -300,7 +300,7 @@ def gaussian_rate_bits_per_value(z, L, zmax):
     """Compute bits/value coding the quantized levels against the N(0, I) base.
 
     This is the independent baseline coded against the fixed N(0, I) prior, as in
-    the current GLIDE coder.
+    the current KATE coder.
     """
     from .codec import gaussian_cumfreq, encode_iid
     levels = quantize(np.asarray(z), L, zmax).ravel()

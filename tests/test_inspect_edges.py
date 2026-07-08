@@ -5,7 +5,7 @@ import os
 import numpy as np
 import pytest
 
-from glide import inspect_traj as it
+from kate import inspect_traj as it
 from _synth import metastable_coords
 
 

@@ -5,7 +5,7 @@ TICA (the idea we reimplemented)."""
 import numpy as np
 import pytest
 
-from glide.kinetic_codec import TICA, kabsch_align
+from kate.kinetic_codec import TICA, kabsch_align
 from _synth import metastable_coords
 
 
@@ -33,7 +33,7 @@ def test_streaming_tica_equals_batch_exactly():
 
 def test_streaming_tica_matches_deeptime():
     pytest.importorskip("deeptime")
-    from glide import kinetics_deeptime as kd
+    from kate import kinetics_deeptime as kd
     X = _aligned_flat(metastable_coords(n_steps=4000, n_atoms=8, seed=1))
     ours = TICA(lag=10, n_components=1).fit([X])
     cv_ours = ours.transform(X)[:, 0]
@@ -49,7 +49,7 @@ def test_compress_streaming_matches_batch():
     between two batch runs due to torch CPU multi-threading non-determinism in the flow
     training; the kinetics, ensemble, and bound are unaffected."""
     pytest.importorskip("torch")
-    from glide.runner import compress_trajectory, compress_streaming
+    from kate.runner import compress_trajectory, compress_streaming
     coords = metastable_coords(n_steps=3000, n_atoms=8, seed=0)
     kw = dict(cv_dim=2, keep_frac=0.1, epochs=40, nstates=30, lag=10, seed=0,
               verbose=False)

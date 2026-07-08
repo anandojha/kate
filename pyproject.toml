@@ -3,9 +3,9 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "glide"
+name = "kate"
 version = "0.1.0"
-description = "GLIDE (Generative Latent Invertible Dynamics-preserving Encoder): kinetics-preserving compression of MD trajectories with a path-distribution fidelity bound"
+description = "KATE (Kinetic-Aware Trajectory Encoder): kinetics-preserving compression of MD trajectories with a path-distribution fidelity bound"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 
-# Core: enough to run `glide compress`, `glide decompress`, and `glide bound`.
+# Core: enough to run `kate compress`, `kate decompress`, and `kate bound`.
 # torch is core because the normalizing flow needs it.
 dependencies = [
     "numpy>=1.24",
@@ -40,8 +40,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Rigorous kinetics engine. Only `glide analyze`, `glide benchmark`, and the T6 VAMPnet
-# path import deeptime; the guards raise `pip install glide[kinetics]` when absent.
+# Rigorous kinetics engine. Only `kate analyze`, `kate benchmark`, and the T6 VAMPnet
+# path import deeptime; the guards raise `pip install kate[kinetics]` when absent.
 kinetics = ["deeptime>=0.4.4", "matplotlib>=3.5"]
 # Test tooling.
 test = ["pytest>=7.0", "pytest-cov>=4.0"]
@@ -49,13 +49,13 @@ test = ["pytest>=7.0", "pytest-cov>=4.0"]
 nflows = ["nflows>=0.14"]
 
 [project.scripts]
-glide = "glide.cli:main"
+kate = "kate.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/anandojha/glide"
-Repository = "https://github.com/anandojha/glide"
-Issues = "https://github.com/anandojha/glide/issues"
-Changelog = "https://github.com/anandojha/glide/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/anandojha/kate"
+Repository = "https://github.com/anandojha/kate"
+Issues = "https://github.com/anandojha/kate/issues"
+Changelog = "https://github.com/anandojha/kate/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]

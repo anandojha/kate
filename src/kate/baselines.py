@@ -3,7 +3,7 @@ Baseline Compressors for the Kinetic-Fidelity Contrast
 ======================================================
 Background
 ----------
-This module provides the external compressors against which GLIDE is benchmarked
+This module provides the external compressors against which KATE is benchmarked
 (the T3 contrast), together with local pseudo-baselines that allow the contrast
 harness to run end-to-end in any environment.
 
@@ -48,8 +48,8 @@ class BaselineUnavailable(RuntimeError):
 
 
 # Environment variable pointing at each external tool (binary or repository dir).
-_ENV = {"sz3": "GLIDE_SZ3_BIN", "zfp": "GLIDE_ZFP_BIN", "mdzip": "GLIDE_MDZIP_DIR"}
-_LOCAL = {"glide", "shuffle", "quantize"}
+_ENV = {"sz3": "KATE_SZ3_BIN", "zfp": "KATE_ZFP_BIN", "mdzip": "KATE_MDZIP_DIR"}
+_LOCAL = {"kate", "shuffle", "quantize"}
 
 
 def available(method: str) -> bool:
@@ -131,7 +131,7 @@ def run_mdzip(coords: np.ndarray, top: str = None, **kw) -> np.ndarray:
     _require_external("mdzip")
     raise BaselineUnavailable(
         "MDZip runs in its own env on the cluster (compress(traj,top,...) / decompress"
-        "(...)); wire $GLIDE_MDZIP_DIR and its python there. Not run locally.")
+        "(...)); wire $KATE_MDZIP_DIR and its python there. Not run locally.")
 
 
 def reconstruct(method: str, coords: np.ndarray, **kw) -> np.ndarray:

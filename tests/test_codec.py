@@ -1,5 +1,5 @@
 """
-Flow-based GLIDE codec tests (torch-gated): the i.i.d. Gaussian-base entropy coder is
+Flow-based KATE codec tests (torch-gated): the i.i.d. Gaussian-base entropy coder is
 exact, kept frames reconstruct to quantization accuracy (the flow inverts exactly),
 and kinetics come from the retained MSM. Artifact save/load round-trip is added by
 T1's test extension.
@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
-from glide.codec import GlideCodec, encode_iid, decode_iid, gaussian_cumfreq  # noqa: E402
+from kate.codec import KateCodec, encode_iid, decode_iid, gaussian_cumfreq  # noqa: E402
 
 
 def _simulate(n_steps, n_atoms, a=0.01, intra=0.25, noise=0.10, seed=0):
@@ -40,18 +40,18 @@ def test_iid_gaussian_base_coder_is_exact():
     assert np.array_equal(decoded, levels)
 
 
-def test_glide_end_to_end_small():
+def test_kate_end_to_end_small():
     torch.manual_seed(0)
     runs = [_simulate(1500, 6, seed=10), _simulate(1500, 6, seed=11)]
-    codec = GlideCodec(n_keep_frac=0.1, flow_layers=8, flow_hidden=48,
+    codec = KateCodec(n_keep_frac=0.1, flow_layers=8, flow_hidden=48,
                      flow_epochs=60, lat_bits=14, tica_lag=10, tica_dim=2,
                      n_states=40, msm_lag=10, seed=0)
     ct = codec.fit_encode(runs, verbose=False)
     # kept frames reconstruct to ~quantization accuracy (flow inverts exactly)
-    rec = GlideCodec.decode_ensemble(ct)
+    rec = KateCodec.decode_ensemble(ct)
     assert rec.shape == (ct.n_keep, 6, 3)
     # the retained MSM gives finite, ordered slow timescales
-    its = GlideCodec.kinetics(ct, k=4)
+    its = KateCodec.kinetics(ct, k=4)
     assert np.all(np.isfinite(its[:2]))
     assert its[0] >= its[1] > 0
     # the coder actually produced bytes and decodes to the right count

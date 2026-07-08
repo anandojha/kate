@@ -1,20 +1,20 @@
 #!/bin/bash
-#  GLIDE - Clean install
-#  Usage:  bash install_glide.sh
+#  KATE - Clean install
+#  Usage:  bash install_kate.sh
 #  This script:
 #    1. Deactivates any active conda env
-#    2. Removes existing glide env (if any)
-#    3. Creates a fresh glide env
+#    2. Removes existing kate env (if any)
+#    3. Creates a fresh kate env
 #    4. Installs conda dependencies (mdtraj, deeptime, matplotlib)
 #    5. Installs pip dependencies (torch)
-#    6. Builds and installs GLIDE from wheel
+#    6. Builds and installs KATE from wheel
 #    7. Runs tests to verify
 set -e
-ENV_NAME="glide"
+ENV_NAME="kate"
 PYTHON_VERSION="3.11"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo ""
-echo "  GLIDE - Clean install"
+echo "  KATE - Clean install"
 echo "  Date: $(date)"
 # 1. Deactivate current env
 echo ""
@@ -22,7 +22,7 @@ echo "[1/7] Deactivating current conda environment."
 conda deactivate 2>/dev/null || true
 conda deactivate 2>/dev/null || true
 echo " Deactivated"
-# 2. Remove existing glide env (if found)
+# 2. Remove existing kate env (if found)
 echo ""
 echo "[2/7] Removing existing '$ENV_NAME' environment."
 conda env remove -n "$ENV_NAME" -y 2>/dev/null || true
@@ -50,32 +50,32 @@ echo ""
 echo "[5/7] Installing pip dependencies (torch)."
 "$ENV_PY" -m pip install torch
 echo "pip dependencies installed"
-# 6. Build and install GLIDE
+# 6. Build and install KATE
 echo ""
-echo "[6/7] Building and installing GLIDE."
+echo "[6/7] Building and installing KATE."
 cd "$SCRIPT_DIR"
 "$ENV_PY" -m pip install build
 "$ENV_PY" -m build --wheel
-WHEEL="$SCRIPT_DIR/dist/glide-0.1.0-py3-none-any.whl"
+WHEEL="$SCRIPT_DIR/dist/kate-0.1.0-py3-none-any.whl"
 if [ ! -f "$WHEEL" ]; then
     echo "ERROR: Wheel not found: $WHEEL"
-    echo "Make sure you run this from the GLIDE directory."
+    echo "Make sure you run this from the KATE directory."
     exit 1
 fi
 "$ENV_PY" -m pip install "${WHEEL}[kinetics,test]" --force-reinstall
-echo "GLIDE installed"
+echo "KATE installed"
 # 7. Verify
 echo ""
 echo "[7/7] Verifying installation."
 echo ""
-"$ENV_PY" -c "import glide; print(f'GLIDE {glide.__version__}')"
+"$ENV_PY" -c "import kate; print(f'KATE {kate.__version__}')"
 "$ENV_PY" -c "import numpy; print(f'NumPy {numpy.__version__}')"
 "$ENV_PY" -c "import scipy; print(f'SciPy {scipy.__version__}')"
 "$ENV_PY" -c "import sklearn; print(f'scikit-learn {sklearn.__version__}')"
 "$ENV_PY" -c "import torch; print(f'PyTorch {torch.__version__}')"
 "$ENV_PY" -c "import mdtraj; print(f'MDTraj {mdtraj.version.version}')"
 "$ENV_PY" -c "import deeptime; print(f'deeptime {deeptime.__version__}')" 2>/dev/null || echo "deeptime not available"
-which glide >/dev/null 2>&1 && echo "glide CLI on PATH" || echo "glide CLI not found"
+which kate >/dev/null 2>&1 && echo "kate CLI on PATH" || echo "kate CLI not found"
 # Run tests
 echo ""
 echo "Running tests."

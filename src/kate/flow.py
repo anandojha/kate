@@ -5,7 +5,7 @@ Normalizing Flow Density Model (RealNVP)
 Background
 ----------
 This module implements a RealNVP normalizing flow in PyTorch, providing the
-learned density model used by GLIDE. It replaces the linear PCA-whitening
+learned density model used by KATE. It replaces the linear PCA-whitening
 employed in earlier stages.
 
 A normalizing flow is an exact diffeomorphism x <-> z and is therefore invertible

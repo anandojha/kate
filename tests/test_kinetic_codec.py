@@ -6,7 +6,7 @@ KineticCodec round trip, and that kinetics are recoverable from the stored MSM.
 import numpy as np
 import pytest
 
-from glide.kinetic_codec import (
+from kate.kinetic_codec import (
     encode_markov, decode_markov, KineticCodec, kabsch_align,
     count_matrix, transition_matrix, implied_timescales, entropy_rate,
 )

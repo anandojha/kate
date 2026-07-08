@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("deeptime")
 
-from glide import kinetics_deeptime as kd
+from kate import kinetics_deeptime as kd
 from _synth import two_state_dtraj
 
 

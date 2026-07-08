@@ -1,17 +1,17 @@
 """
-On-Disk Format for a GLIDE Artifact
+On-Disk Format for a KATE Artifact
 ===================================
 Background
 ----------
-This module defines the persistent format of a GLIDE artifact, the compressed
+This module defines the persistent format of a KATE artifact, the compressed
 object that also serves as the substrate for downstream analysis. The schema is
 method-tag aware (cv / flow / entropy) so that the T6-T8 machine-learning variants
 can be incorporated without revision, and it is loadable without torch so that
-``glide bound`` (pure numpy) runs on a host with neither torch nor deeptime.
+``kate bound`` (pure numpy) runs on a host with neither torch nor deeptime.
 
 On-disk layout
 --------------
-An artifact is a directory ``NAME.glide/`` containing three files:
+An artifact is a directory ``NAME.kate/`` containing three files:
 
   config.json   scalars, method tags, flow architecture, and time metadata
   arrays.npz    coded latents, kept indices, k-means centers, counts, the

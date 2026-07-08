@@ -1,4 +1,4 @@
-# Contributing to glide
+# Contributing to kate
 
 Thanks for your interest. A few conventions keep this package clean and publishable.
 
@@ -8,7 +8,7 @@ Thanks for your interest. A few conventions keep this package clean and publisha
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[kinetics,test]"     # core + deeptime/matplotlib + pytest
 pytest                                 # run the suite
-pytest --cov=glide --cov-report=term-missing   # with coverage
+pytest --cov=kate --cov-report=term-missing   # with coverage
 ```
 
 > **macOS note.** Use a *fully isolated* venv. A `--system-site-packages` venv that

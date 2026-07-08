@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("torch")
 
-from glide.runner import compress_trajectory
+from kate.runner import compress_trajectory
 from _synth import metastable_coords
 
 

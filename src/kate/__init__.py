@@ -1,12 +1,12 @@
 """
-Generative Latent Invertible Dynamics-Preserving Encoder
+Kinetic-Aware Trajectory Encoder
 ========================================================
 Background
 ----------
-GLIDE provides kinetics-preserving compression of molecular dynamics trajectories
+KATE provides kinetics-preserving compression of molecular dynamics trajectories
 together with a kinetic, path-distribution fidelity bound. Ensemble-preserving
 compression does not in general preserve kinetics: two ensembles with identical
-stationary distributions may exhibit different transition rates. GLIDE addresses
+stationary distributions may exhibit different transition rates. KATE addresses
 this by bounding the path-distribution divergence, which decomposes as
 
     KL(path) = ensemble term + transition term,
@@ -16,7 +16,7 @@ The kinetic bound is the central contribution of the package.
 
 Import hygiene
 --------------
-Importing ``glide``, including ``from glide import pathbound``, pulls in neither
+Importing ``kate``, including ``from kate import pathbound``, pulls in neither
 torch nor deeptime. The pure-numpy path that evaluates the kinetic ``bound``
 therefore runs on a host with neither dependency installed. The torch-backed
 components (flow, codec, runner, spline_flow, temporal_prior) and the
@@ -40,16 +40,16 @@ from .pathbound import (  # noqa: E402
     stationary_distribution,
 )
 
-# The following attributes are resolved lazily so that importing ``glide`` never
+# The following attributes are resolved lazily so that importing ``kate`` never
 # imports torch or deeptime. Each entry maps name -> (submodule, attribute).
 _LAZY = {
-    "GlideCodec": ("codec", "GlideCodec"),
-    "GlideArtifact": ("codec", "GlideArtifact"),
+    "KateCodec": ("codec", "KateCodec"),
+    "KateArtifact": ("codec", "KateArtifact"),
     "igfs_select": ("codec", "igfs_select"),
     "RealNVP": ("flow", "RealNVP"),
     "KineticCodec": ("kinetic_codec", "KineticCodec"),
     "CompressedTrajectory": ("kinetic_codec", "CompressedTrajectory"),
-    "run_glide": ("runner", "run_glide"),
+    "run_kate": ("runner", "run_kate"),
     "save_artifact": ("artifact", "save_artifact"),
     "load_artifact": ("artifact", "load_artifact"),
 }

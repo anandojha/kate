@@ -1,7 +1,7 @@
 """
-The hard guarantee that `glide bound` (and the rest of the pure-numpy path) runs on a
-box with NEITHER torch NOR deeptime installed: importing `glide` -- or
-`from glide import pathbound` -- must not drag either heavy library into sys.modules.
+The hard guarantee that `kate bound` (and the rest of the pure-numpy path) runs on a
+box with NEITHER torch NOR deeptime installed: importing `kate` -- or
+`from kate import pathbound` -- must not drag either heavy library into sys.modules.
 
 Run in a SUBPROCESS, not in-process: within one pytest session another test
 (test_flow / test_codec) imports torch, which would pollute this process's
@@ -23,15 +23,15 @@ def _modules_after(import_stmt: str):
     return r
 
 
-def test_import_glide_pulls_in_neither_torch_nor_deeptime():
-    r = _modules_after("import glide")
-    assert r.returncode == 0, f"eager heavy import on `import glide`: {r.stdout}{r.stderr}"
+def test_import_kate_pulls_in_neither_torch_nor_deeptime():
+    r = _modules_after("import kate")
+    assert r.returncode == 0, f"eager heavy import on `import kate`: {r.stdout}{r.stderr}"
 
 
-def test_from_glide_import_pathbound_pulls_in_neither():
-    r = _modules_after("from glide import pathbound")
+def test_from_kate_import_pathbound_pulls_in_neither():
+    r = _modules_after("from kate import pathbound")
     assert r.returncode == 0, (
-        f"eager heavy import on `from glide import pathbound`: {r.stdout}{r.stderr}"
+        f"eager heavy import on `from kate import pathbound`: {r.stdout}{r.stderr}"
     )
 
 
@@ -39,7 +39,7 @@ def test_pathbound_report_runs_without_torch_or_deeptime():
     # The kinetic bound must be fully usable with neither library present.
     code = (
         "import sys, numpy as np\n"
-        "from glide import report_kinetic_fidelity\n"
+        "from kate import report_kinetic_fidelity\n"
         "P = np.array([[0.9, 0.1], [0.1, 0.9]])\n"
         "Q = np.array([[0.8, 0.2], [0.2, 0.8]])\n"
         "out = report_kinetic_fidelity(P, Q, lag=1)\n"

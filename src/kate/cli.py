@@ -3,17 +3,17 @@ Command-Line Interface
 ======================
 Background
 ----------
-This module provides the single ``glide`` entry point and its subcommands:
+This module provides the single ``kate`` entry point and its subcommands:
 
-  glide compress   TOP DCD -o ART      align -> CV/flow -> IGFS -> entropy code + MSM
-  glide decompress ART -o OUT          flow inverse for kept frames (+T4 full-atom)
-  glide analyze    ART                 deeptime MSM: timescales, lag scan, Bayesian bars  [T2]
-  glide bound      ART REF             ensemble term, transition term, Pinsker pair/path
-  glide benchmark  TOP DCD             GLIDE vs MDZip/SZ3/ZFP, scored by the path bound      [T3]
+  kate compress   TOP DCD -o ART      align -> CV/flow -> IGFS -> entropy code + MSM
+  kate decompress ART -o OUT          flow inverse for kept frames (+T4 full-atom)
+  kate analyze    ART                 deeptime MSM: timescales, lag scan, Bayesian bars  [T2]
+  kate bound      ART REF             ensemble term, transition term, Pinsker pair/path
+  kate benchmark  TOP DCD             KATE vs MDZip/SZ3/ZFP, scored by the path bound      [T3]
 
 Imports are deferred per subcommand. The module top level imports only argparse,
 and each handler imports only the components it requires. Consequently
-``glide bound`` (pure numpy) imports neither torch nor deeptime, so the kinetic
+``kate bound`` (pure numpy) imports neither torch nor deeptime, so the kinetic
 guarantee can be evaluated on a host without either dependency installed.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _is_artifact_dir(path: str) -> bool:
 def _load_reference_counts(path: str):
     """Load the reference dynamics P for the ``bound`` subcommand.
 
-    The reference may be a .glide artifact, in which case its stored counts are
+    The reference may be a .kate artifact, in which case its stored counts are
     used, or an .npy/.npz file holding a count or transition matrix.
     """
     import numpy as np
@@ -53,9 +53,9 @@ def _load_reference_counts(path: str):
 # subcommands
 # ----------------------------------------------------------------------------- #
 def cmd_compress(args):
-    from .runner import run_glide, print_report
+    from .runner import run_kate, print_report
     from .artifact import save_artifact
-    art, report = run_glide(
+    art, report = run_kate(
         args.top, args.dcd, stride=args.stride, cv=args.cv, features=args.features,
         cv_dim=args.cv_dim, keep_frac=args.keep_frac, epochs=args.epochs,
         nstates=args.nstates, lag_ns=args.lag_ns, dt_ps=args.dt_ps, lat_bits=args.lat_bits,
@@ -127,13 +127,13 @@ def cmd_bound(args):
     if Cp.shape[0] != Cq.shape[0]:
         print("  WARNING: reference (%d) and artifact (%d) state counts differ; comparing"
               " the first %d states. For a FAIR comparison discretize both on COMMON"
-              " k-means centers (see `glide benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
+              " k-means centers (see `kate benchmark`)." % (Cp.shape[0], Cq.shape[0], n))
     Cp, Cq = Cp[:n, :n], Cq[:n, :n]
     act = largest_connected_set(Cp + Cq)        # ergodic under the combined counts
     # The `bound` subcommand is the portable scorer (pure numpy, no torch or
     # deeptime) and therefore uses the (C+C^T)/2 symmetrized estimator. The
     # reversible-MLE timescales suitable for publication are produced by
-    # `glide analyze` via deeptime. Both estimators are reversible; the MLE is
+    # `kate analyze` via deeptime. Both estimators are reversible; the MLE is
     # the less biased of the two.
     P, _ = estimate_reversible_T(Cp[np.ix_(act, act)], prefer="cc")
     Q, _ = estimate_reversible_T(Cq[np.ix_(act, act)], prefer="cc")
@@ -145,7 +145,7 @@ def cmd_bound(args):
     print("  artifact (Q)          : %s" % args.artifact)
     print("  reference (P)         : %s" % args.ref)
     print("  active states         : %d" % len(act))
-    print("  MSM estimator         : (C+C^T)/2 symmetrized (portable; `glide analyze` "
+    print("  MSM estimator         : (C+C^T)/2 symmetrized (portable; `kate analyze` "
           "gives the deeptime reversible-MLE timescales)")
     print("-" * 72)
     print("  ensemble term   D(mu_P||mu_Q)     : %.4e nats   (STATIC bound sees only this)"
@@ -191,8 +191,8 @@ def cmd_analyze(args):
     from .artifact import load_artifact
     from . import kinetics_deeptime as kd
     if not kd._HAVE_DEEPTIME:
-        raise SystemExit("`glide analyze` needs the kinetics engine: "
-                         "pip install glide[kinetics]  (deeptime). Original error: %r"
+        raise SystemExit("`kate analyze` needs the kinetics engine: "
+                         "pip install kate[kinetics]  (deeptime). Original error: %r"
                          % (kd._IMPORT_ERR,))
 
     art = load_artifact(args.artifact, with_flow=False)
@@ -318,15 +318,15 @@ def cmd_benchmark(args):
 # ----------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="glide",
-        description="GLIDE (Generative Latent Invertible Dynamics-preserving Encoder): "
+        prog="kate",
+        description="KATE (Kinetic-Aware Trajectory Encoder): "
                     "kinetics-preserving compression of MD trajectories, with a "
                     "kinetic (path-distribution) fidelity bound.")
     sub = p.add_subparsers(dest="command", required=True)
 
     c = sub.add_parser("compress", help="TOP DCD -> artifact (flow codec + retained MSM)")
     c.add_argument("top"); c.add_argument("dcd")
-    c.add_argument("-o", "--out", required=True, help="output artifact path (NAME.glide)")
+    c.add_argument("-o", "--out", required=True, help="output artifact path (NAME.kate)")
     c.add_argument("--stride", type=int, default=10)
     c.add_argument("--cv-dim", type=int, default=6)
     c.add_argument("--keep-frac", type=float, default=0.10)
@@ -380,10 +380,10 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--L", type=int, default=None, help="trajectory length for the path KL")
     b.set_defaults(func=cmd_bound)
 
-    k = sub.add_parser("benchmark", help="TOP DCD -> contrast table+plot (GLIDE vs baselines)")
+    k = sub.add_parser("benchmark", help="TOP DCD -> contrast table+plot (KATE vs baselines)")
     k.add_argument("top"); k.add_argument("dcd")
-    k.add_argument("--methods", default="glide,sz3,zfp,mdzip",
-                   help="comma list: glide, sz3, zfp, mdzip, shuffle, quantize")
+    k.add_argument("--methods", default="kate,sz3,zfp,mdzip",
+                   help="comma list: kate, sz3, zfp, mdzip, shuffle, quantize")
     k.add_argument("--stride", type=int, default=10)
     k.add_argument("--lag", type=int, default=10)
     k.add_argument("--nstates", type=int, default=100)

@@ -1,6 +1,6 @@
-# GLIDE - Methods and Results
+# KATE - Methods and Results
 
-*GLIDE - **G**enerative **L**atent **I**nvertible **D**ynamics-preserving **E**ncoder:
+*KATE - **K**inetic-**A**ware **T**rajectory **E**ncoder:
 kinetics-preserving compression of molecular-dynamics trajectories, with a
 kinetic (path-distribution) fidelity bound. This document consolidates the method
 and the measurements obtained on the NTL9 fast-folder. Each quantitative claim is
@@ -16,7 +16,7 @@ observables computed from them: the equilibrium ensemble (free energies, contact
 populations) and, more demandingly, the kinetics (the slow timescales and the transition
 rates between metastable states).
 
-The central observation motivating GLIDE is the following.
+The central observation motivating KATE is the following.
 
 > Preserving the ensemble does not preserve the kinetics. A compressor can
 > reproduce every equilibrium average and still destroy the slow dynamics, and a
@@ -24,7 +24,7 @@ The central observation motivating GLIDE is the following.
 > tight tolerance and still collapse the implied timescales, because the slow modes
 > reside in a low-variance subspace that uniform error bounds do not protect.
 
-The contribution of GLIDE is a compressor built around an observable-space bound: a
+The contribution of KATE is a compressor built around an observable-space bound: a
 KL/Pinsker guarantee in the space of the *path distribution*, which is the quantity
 that covers the kinetics. The bound is the organizing principle, and the neural-network
 components are motivated by it rather than constituting the primary result.
@@ -50,7 +50,7 @@ KL_path(P || Q)  =  KL_ensemble(π_P || π_Q)        (the static / ensemble term
   ensemble term to zero while leaving this term large.
 
 By Pinsker's inequality, each KL term bounds the total-variation distance of the
-corresponding observables, providing certifiable error bars. `glide bound` reports both
+corresponding observables, providing certifiable error bars. `kate bound` reports both
 terms and labels which observable each covers. The static Pinsker bound does not cover
 kinetics; only the path-distribution (transition) term does.
 
@@ -62,10 +62,10 @@ kinetics; only the path-distribution (transition) term does.
 trajectory -> align (Kabsch, protein-only) -> collective variables (TICA / VAMPnet)
            -> normalizing flow (RealNVP / spline)  -> information-gain frame selection
            -> entropy coding (Gaussian / temporal / predictive)
-           -> retained MSM  ------------------------------> the .glide artifact
+           -> retained MSM  ------------------------------> the .kate artifact
 ```
 
-The compressed object also serves as the analysis substrate: the `.glide` artifact stores the
+The compressed object also serves as the analysis substrate: the `.kate` artifact stores the
 run-aware all-frame discrete trajectory (`dtraj`) + k-means centers + the flow, so that
 `analyze` / `bound` / `benchmark` re-estimate the MSM at any lag without the
 original trajectory; the file is itself the kinetic model. The pure-numpy `bound` path
@@ -101,7 +101,7 @@ flows, and context-model entropy coding are cited prior art.
 
 A comparison of compressors on a trajectory first requires knowledge of what that trajectory can
 validate. A compressor cannot preserve a kinetic observable that the source never
-sampled. `glide analyze --resolution` reports, per dynamical process, the Bayesian
+sampled. `kate analyze --resolution` reports, per dynamical process, the Bayesian
 timescale, its 95 % confidence interval, the relative uncertainty, and the number of
 independent events the trajectory contains (≈ T_total / t_i). A process is flagged
 *resolved* only if its Bayesian error is small and it contains sufficient events.
@@ -120,7 +120,7 @@ System: NTL9 fast-folder, 39 residues, 25 µs at 10 ps. Featurization: CA-CA dis
 (|i−j| ≥ 3) → TICA slow CVs. Kinetics: deeptime reversible-MLE MSM on a common k-means
 discretization; error = mean relative error of the resolved-band implied timescales.
 
-### 6.1 The contrast - GLIDE vs SZ3/ZFP (`ntl9_contrast_resolved.png`)
+### 6.1 The contrast - KATE vs SZ3/ZFP (`ntl9_contrast_resolved.png`)
 
 Real SZ3 and ZFP 1.0.1 binaries were run in fixed-accuracy mode, swept over the error bound;
 each reconstruction was re-featurized, re-projected on the same TICA, discretized on
@@ -128,28 +128,28 @@ the same centers, and then scored on the resolved band.
 
 | to keep resolved kinetics < 1 % error | rate needed |
 |---|---|
-| GLIDE (slow CVs + kinetic model) | ~12 bits/frame |
+| KATE (slow CVs + kinetic model) | ~12 bits/frame |
 | SZ3 (all-atom, error-bounded) | ~840 bits/frame |
 | ZFP (all-atom, error-bounded) | ~1400 bits/frame |
 
 This corresponds to a ~70-120× rate gap. Under aggressive compression the general compressors
 collapse the kinetics: SZ3 reaches 95 % timescale error at 331 bits/frame. They
 spend bits on bounded *all-atom* error, without regard to which coordinate combinations carry
-the slow dynamics, whereas GLIDE's bound targets the kinetics directly.
+the slow dynamics, whereas KATE's bound targets the kinetics directly.
 
-GLIDE and SZ3/ZFP optimize different objectives: SZ3/ZFP provide bounded
-all-atom reconstruction, while GLIDE provides the kinetic model (slow CVs + MSM; all-atom
+KATE and SZ3/ZFP optimize different objectives: SZ3/ZFP provide bounded
+all-atom reconstruction, while KATE provides the kinetic model (slow CVs + MSM; all-atom
 reconstruction would add the T4 residual bits). The comparable axis is the *rate
 needed for a given kinetic fidelity*, which is the quantity plotted in the figure.
 
 ### 6.2 The T9 gate - predictive entropy coding (`ntl9_temporal_redundancy.png`, `ntl9_t9_gate.png`)
 
-*Rate half.* GLIDE compresses *slow* CVs, whose µs timescales keep them strongly
+*Rate half.* KATE compresses *slow* CVs, whose µs timescales keep them strongly
 autocorrelated (ρ ≈ 0.98) even at the 0.5 ns storage stride. At equal distortion,
 predictive coding saves ~15 bits/frame (~43 %) over static per-frame coding (35 →
 20 bits/frame, 8 CVs), and ~14 bits even at 1 ns. This corrects an earlier conservative
 hedge ("gain may be modest, frames decorrelated at ~100 ps"), which holds for fast
-Cartesian modes but not for the slow CVs that GLIDE stores.
+Cartesian modes but not for the slow CVs that KATE stores.
 
 *Observable-error half.* With closed-loop DPCM reconstruction, scored on the
 resolved band, the predictive rate-vs-kinetics-error frontier lies far to the left of static:
@@ -207,10 +207,10 @@ pip install -e ".[kinetics,test]"
 python -m pytest -q                                   # 118 tests, torch/deeptime auto-skip
 python examples/demo_pathbound.py                     # the kinetic bound (pure numpy)
 python examples/demo_bound_loss.py                    # T10 mechanism (synthetic)
-glide analyze ART --resolution                          # kinetic-resolution report
-glide benchmark TOP DCD --methods glide,sz3,zfp           # the contrast (needs SZ3/ZFP binaries)
+kate analyze ART --resolution                          # kinetic-resolution report
+kate benchmark TOP DCD --methods kate,sz3,zfp           # the contrast (needs SZ3/ZFP binaries)
 ```
 
 The NTL9 measurement scripts (figures in `docs/`) require the 25 µs trajectory, which
 is not included in the repository; the synthetic mechanism demos and the full test suite run anywhere.
-Baseline binaries are located via `GLIDE_SZ3_BIN` / `GLIDE_ZFP_BIN` / `GLIDE_MDZIP_DIR`.
+Baseline binaries are located via `KATE_SZ3_BIN` / `KATE_ZFP_BIN` / `KATE_MDZIP_DIR`.

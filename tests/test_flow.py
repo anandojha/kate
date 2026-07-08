@@ -1,13 +1,13 @@
 """
 RealNVP normalizing-flow tests (torch-gated). The flow is the learned density at
-the heart of GLIDE; the property that matters for the bound is EXACT invertibility
+the heart of KATE; the property that matters for the bound is EXACT invertibility
 (a diffeomorphism), plus a sane learned density.
 """
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
-from glide.flow import RealNVP  # noqa: E402
+from kate.flow import RealNVP  # noqa: E402
 
 
 def _three_wells(n=4000, seed=0):

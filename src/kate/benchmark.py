@@ -7,12 +7,12 @@ This module implements the T3 contrast, the central benchmark figure. The
 pipeline proceeds as follows:
 
   load trajectory
-    -> reconstruct with {GLIDE, baselines} (GLIDE retains its MSM; the baselines
+    -> reconstruct with {KATE, baselines} (KATE retains its MSM; the baselines
        reconstruct coordinates)
     -> featurize with a common TICA and discretize against common k-means centers
     -> estimate a reversible MSM per method on the same active-state support
        (matched indexing)
-    -> score with glide_pathbound against the original MSM (ensemble term and
+    -> score with kate_pathbound against the original MSM (ensemble term and
        transition term)
     -> tabulate and plot the implied timescales and transition term per method.
 
@@ -32,7 +32,7 @@ through to the estimator.
 Expected result
 ---------------
 Ensemble-only and coordinate-bounded methods exhibit a large transition term
-(their implied timescales drift), whereas the GLIDE transition term is
+(their implied timescales drift), whereas the KATE transition term is
 approximately zero because it retains the MSM. The ensemble term is small for all
 methods, which is precisely why a static, ensemble-only bound would incorrectly
 certify the other methods as faithful.
@@ -57,7 +57,7 @@ def _assign(CV, centers):
     return cKDTree(np.asarray(centers)).query(np.asarray(CV))[1].astype(np.int64)
 
 
-def run_benchmark(coords_runs, methods=("glide", "shuffle", "quantize"), *, lag=10,
+def run_benchmark(coords_runs, methods=("kate", "shuffle", "quantize"), *, lag=10,
                   nstates=50, cv_dim=2, dt_strided_ns=0.1, out=None, seed=0,
                   verbose=True):
     """Score each method's kinetic fidelity against the original MSM.
@@ -90,8 +90,8 @@ def run_benchmark(coords_runs, methods=("glide", "shuffle", "quantize"), *, lag=
     results = []
     for m in methods:
         m = m.lower()
-        if m == "glide":
-            # GLIDE retains the MSM, so its kinetics are the reference dynamics.
+        if m == "kate":
+            # KATE retains the MSM, so its kinetics are the reference dynamics.
             Q = P
             note = "retained MSM (kinetics not re-estimated)"
             available = True
@@ -152,7 +152,7 @@ def _print_table(results, its_ref_ns):
                  r["pinsker_pair"], t2))
     print("-" * 84)
     print("Reading: a small ENSEMBLE term with a large TRANSITION term = 'ensemble")
-    print("preserved, kinetics not' -- the static bound would wrongly certify it. GLIDE's")
+    print("preserved, kinetics not' -- the static bound would wrongly certify it. KATE's")
     print("transition term is ~0 because it retains the MSM. (Real MDZip/SZ3/ZFP numbers")
     print("come from their cluster runs; 'shuffle'/'quantize' are local stand-ins.)")
     print("=" * 84)
@@ -164,7 +164,7 @@ def _plot(results, its_ref_ns, out):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception as e:  # pragma: no cover
-        print("  (matplotlib unavailable: %s -- skipping plot; pip install glide[kinetics])" % e)
+        print("  (matplotlib unavailable: %s -- skipping plot; pip install kate[kinetics])" % e)
         return
     avail = [r for r in results if r.get("available")]
     if not avail:
@@ -174,14 +174,14 @@ def _plot(results, its_ref_ns, out):
     t2 = [r["its_cmp_ns"][0] if len(r["its_cmp_ns"]) else np.nan for r in avail]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-    ax1.bar(names, trans, color=["#2a7" if n == "glide" else "#c44" for n in names])
+    ax1.bar(names, trans, color=["#2a7" if n == "kate" else "#c44" for n in names])
     ax1.set_yscale("symlog", linthresh=1e-6)
     ax1.set_ylabel("transition term  h(P||Q)  (nats/step)")
     ax1.set_title("Kinetic distortion (lower = better)")
     ax1.axhline(0, color="k", lw=0.5)
 
     ax2.axhline(its_ref_ns[0], color="k", ls="--", lw=1, label="reference t2")
-    ax2.bar(names, t2, color=["#2a7" if n == "glide" else "#c44" for n in names])
+    ax2.bar(names, t2, color=["#2a7" if n == "kate" else "#c44" for n in names])
     ax2.set_ylabel("slowest implied timescale  t2  (ns)")
     ax2.set_title("Slowest timescale per method")
     ax2.legend()
