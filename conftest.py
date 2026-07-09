@@ -7,8 +7,7 @@ import sys
 import os
 
 _PROJECT_ROOT = Path(__file__).parent
-# src layout: make `import kate` work from a bare checkout without an install.
-sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+# root layout: make `import kate` work from a bare checkout without an install.
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 
@@ -22,7 +21,7 @@ def pytest_sessionfinish(session, exitstatus):
     (Python regenerates it on import, so a recursive removal is not worth the cost).
     """
     runtime_targets = {"kate_runs", "bd_sims"}
-    skip_path_parts = {".git", "build", "dist", ".venv", ".github", "src"}
+    skip_path_parts = {".git", "build", "dist", ".venv", ".github", "kate.egg-info"}
 
     # Safety: only walk inside the project root so that invoking pytest from
     # elsewhere (cd ~ && pytest) cannot rmtree a directory it does not own.

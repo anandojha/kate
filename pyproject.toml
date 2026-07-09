@@ -57,7 +57,8 @@ Repository = "https://github.com/anandojha/kate"
 Issues = "https://github.com/anandojha/kate/issues"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["kate*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -68,5 +69,5 @@ python_functions = ["test_*"]
 
 [tool.coverage.run]
 omit = [
-    "src/kate/vampnet_cv.py",
+    "kate/vampnet_cv.py",
 ]
