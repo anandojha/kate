@@ -73,7 +73,7 @@ The path-space bound KATE uses is established prior art; the contribution is ado
 
 - Pantazis and Katsoulakis, J. Chem. Phys. 138, 054115 (2013), arXiv:1210.7264 - relative-entropy-rate path-space sensitivity for stationary stochastic dynamics.
 - Dupuis, Katsoulakis, Pantazis and Plechac, SIAM/ASA JUQ (2016), arXiv:1503.05136 - goal-oriented path-space information bounds, tighter than plain relative-entropy-rate and Pinsker.
-- Birrell, Katsoulakis and Rey-Bellet, arXiv:1906.09282 (2019) - path-space bounds for hitting times and mean first-passage times specifically.
+- Birrell, Katsoulakis and Rey-Bellet, ESAIM: M2AN 55, 131 (2021), arXiv:1906.09282 - goal-oriented relative-entropy bounds for hitting times and mean first-passage times specifically.
 
 KATE's stationary-plus-transition factorization is the discrete-time finite-state Markov specialization of that object.
 
@@ -102,6 +102,8 @@ conda activate kate
 pip install -e ".[kinetics,test]"
 ```
 
+The baseline compressors used in the twelve-protein benchmark (SZ3, ZFP, fpzip, SPERR, MDZip) are external and install separately; see [`COMPRESSORS.md`](COMPRESSORS.md).
+
 ## Testing
 
 ```bash
@@ -128,7 +130,8 @@ examples/
 ├── demo_pathbound.py         The path-space bound (ensemble term ~0, transition term large)
 ├── demo_kinetic_codec.py     The classical MSM-as-entropy-coder path
 ├── demo_kate.py              End-to-end flow-based codec on a synthetic trajectory
-└── demo_bound_loss.py        The differentiable path-bound loss
+├── demo_bound_loss.py        The differentiable path-bound loss
+└── demo_rd_train.py          Kinetic rate-distortion training (kinetics vs MSE objective)
 ```
 
 ## Requirements
