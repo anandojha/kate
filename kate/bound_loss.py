@@ -1,39 +1,35 @@
 """
-Differentiable Kinetic Path-Bound Loss
-======================================
+A differentiable form of the kinetic path-distribution bound, for use as a training
+loss rather than only as a post hoc score.
 
-Background
-----------
-This module makes the kinetic path-distribution bound differentiable, so that it may
-serve as a training loss rather than only as a post hoc scorer. It enables a neural
-compressor to be trained to preserve kinetic observables, specifically the transition
-term of the path bound, in place of coordinate mean-squared error.
+Coordinate mean-squared error preserves geometry but says nothing about the dynamics.
+The path bound supplies a kinetic distortion instead, and made differentiable it lets a
+compressor spend bits where they move the kinetics. The construction rests on a
+VAMPnet-style soft state assignment chi(x) valued in the probability simplex, which makes
+the microstate populations, and hence the transition matrix, a smooth function of the
+network weights (VAMPnets: Mardt et al., Nat. Commun. 9, 5 (2018); deep generalized MSMs:
+Wu and Noe, J. Nonlinear Sci. 30, 23 (2020)). From the soft assignments at times t and
+t + tau the lagged covariances are
 
-A VAMPnet-style soft state assignment chi(x) in the probability simplex renders the
-microstate populations, and therefore the transition matrix, a smooth, differentiable
-function of the network (VAMPnets: Mardt et al., Nat. Commun. 9, 5 (2018); deep
-generalized MSMs: Wu and Noe, J. Nonlinear Sci. 30, 23 (2020)). From soft assignments
-at times t and t + tau,
+    C00 = <chi_t chi_t^T>,  C01 = <chi_t chi_{t+tau}^T>,  C11 = <chi_{t+tau} chi_{t+tau}^T>,
 
-    C00 = <chi_t chi_t^T>,  C01 = <chi_t chi_{t+tau}^T>,  C11 = <chi_{t+tau} chi_{t+tau}^T>
-    T     = C00^{-1} C01                              (row-normalized soft transition matrix)
-    VAMP2 = || C00^{-1/2} C01 C11^{-1/2} ||_F^2       (slow-dynamics score for pretraining chi)
+from which T = C00^{-1} C01 is the row-normalized soft transition matrix and
+VAMP2 = || C00^{-1/2} C01 C11^{-1/2} ||_F^2 is the slow-dynamics score used to pretrain
+chi. The transition term of the path bound between a reference dynamics P and a
+compressed dynamics Q,
 
-The path-bound transition term between a reference dynamics P and a compressed dynamics
-Q, h(P||Q) = sum_i pi_i sum_j P_ij log(P_ij / Q_ij), is then differentiable end-to-end,
-so that loss = rate + lambda * h(P||Q) trains a compressor to allocate bits where they
-affect the kinetics. All computation here uses pure torch autograd; deeptime is not
-required.
+    h(P||Q) = sum_i pi_i sum_j P_ij log(P_ij / Q_ij),
 
-Scope
------
-The quantity defined here is a differentiable surrogate of the bound, combining soft
-states with a regression transition matrix, used as a loss. The reported, certified
-kinetics are obtained separately from the deeptime reversible-maximum-likelihood MSM
-together with the path bound evaluated on hard states (kate.pathbound, kate.analyze).
-Whether training on the bound improves upon training on mean-squared error is an
-empirical question, measured rather than assumed (see the examples and the T10
-experiment).
+with pi the stationary distribution of P and the term measured in nats per step, is then
+differentiable end to end, so that loss = rate + lambda * h(P||Q) is trainable by plain
+torch autograd.
+
+The quantity built here is a differentiable surrogate of the bound, soft states paired
+with a regression transition matrix, suitable as a loss. The certified kinetics are
+computed separately, from the deeptime reversible maximum-likelihood MSM with the path
+bound evaluated on hard states (kate.pathbound, kate.analyze). Whether training on this
+surrogate beats training on mean-squared error is an empirical question, measured rather
+than assumed.
 """
 from __future__ import annotations
 

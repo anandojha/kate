@@ -1,35 +1,33 @@
 #!/usr/bin/env python
 """
-Flow-Based KATE Trajectory Compression Runner
-==============================================
-This module provides the execution backend for ``kate compress``, applying
-flow-based KATE to molecular-dynamics trajectories supplied either as in-memory
-arrays or as DCD files. Dimensionality reduction to a small set of TICA collective
-variables precedes flow training, which keeps the procedure tractable for systems
-of size 3N of order 5000.
+Execution backend for ``kate compress``, driving flow-based KATE over
+molecular-dynamics trajectories supplied as in-memory coordinate arrays or as
+DCD files.
 
-Entry points
-------------
-Three entry points share a common post-collective-variable core, ``_assemble_artifact``:
+A trajectory of T frames on N atoms is first reduced to a small set of d_cv
+slow collective variables by TICA. Flow training and MSM estimation are
+tractable in d_cv ~ 6 dimensions but not in the full 3N ~ 5000 of a
+solvent-stripped protein, so the collective-variable step precedes everything
+else. Three entry points share the common post-collective-variable core
+``_assemble_artifact``. ``compress_trajectory(coords_runs)`` operates in memory
+and is run-aware, the default path. ``compress_streaming(chunk_factory)`` runs
+out of core through streaming TICA: the chunked ``partial_fit`` accumulates the
+same lagged covariances as the batch estimator across chunk boundaries and so
+reproduces it exactly, while the full trajectory is never held, only the
+low-dimensional collective variables and the sparse set of kept frames. That
+path is multi-pass, a streaming TICA fit, a transform pass yielding the
+collective variables that then drives flow training, frame selection, and MSM
+estimation, and a final pass reading back only the kept frames for the
+residual. ``run_kate(top, dcd[, streaming=True])`` is the DCD loader feeding
+either path.
 
-  * ``compress_trajectory(coords_runs)`` operates in memory and is run-aware. It is
-    the default path.
-  * ``compress_streaming(chunk_factory)`` performs out-of-core compression using
-    streaming TICA (chunked ``partial_fit``), so the collective-variable step scales
-    beyond available memory. The full trajectory is never retained; only the
-    low-dimensional collective variables and the sparse set of kept frames are held.
-    The procedure is multi-pass: a streaming TICA fit, a transform pass producing
-    collective variables followed by flow training, frame selection, and MSM
-    estimation, and a final pass that reads only the kept frames for the residual.
-    Streaming TICA reproduces batch TICA exactly, since cross-chunk lagged pairs are
-    retained.
-  * ``run_kate(top, dcd[, streaming=True])`` provides the DCD loader for both paths.
-
-Kinetic bound
--------------
-The path-distribution bound is incorporated directly. For KATE the retained MSM Q
-equals the full-data reference P, so the transition term vanishes by construction.
-The full-atom residual stage recovers the fast modes discarded by TICA.
+The reconstruction is controlled by the path-space bound: the deviation of any
+kinetic observable of the retained ensemble is bounded through Pinsker's
+inequality by D_KL(Q || P), the Kullback-Leibler divergence between the
+retained path distribution Q and the full-data reference P. KATE fixes Q to the
+reference MSM, so the transition term of the bound vanishes by construction and
+only the per-frame ensemble term survives. The full-atom residual stage then
+restores the fast modes that TICA discards.
 """
 from __future__ import annotations
 

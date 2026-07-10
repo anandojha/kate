@@ -1,28 +1,24 @@
 """
-Kinetic-Aware Trajectory Encoder
-========================================================
-Background
-----------
-KATE provides kinetics-preserving compression of molecular dynamics trajectories
-together with a kinetic, path-distribution fidelity bound. Ensemble-preserving
-compression does not in general preserve kinetics: two ensembles with identical
-stationary distributions may exhibit different transition rates. KATE addresses
-this by bounding the path-distribution divergence, which decomposes as
+KATE, the Kinetic-Aware Trajectory Encoder: kinetics-preserving compression of
+molecular dynamics trajectories with a bound on path-distribution fidelity.
 
-    KL(path) = ensemble term + transition term,
+Preserving the stationary ensemble does not preserve kinetics, since two ensembles
+with identical stationary distributions can still carry different transition rates.
+KATE instead bounds the divergence between the path distributions of the original
+and reconstructed trajectories, which splits into an ensemble term and a transition
+term,
 
-so that kinetic observables, and not only static ensemble averages, are covered.
-The kinetic bound is the central contribution of the package.
+    KL(path) = KL(ensemble) + KL(transition),
 
-Import hygiene
---------------
-Importing ``kate``, including ``from kate import pathbound``, pulls in neither
-torch nor deeptime. The pure-numpy path that evaluates the kinetic ``bound``
-therefore runs on a host with neither dependency installed. The torch-backed
-components (flow, codec, runner, spline_flow, temporal_prior) and the
-deeptime-backed components (kinetics_deeptime, vampnet_cv) are imported lazily,
-on first access or when the corresponding CLI subcommand executes. This property
-is enforced by tests/test_no_eager_torch.py.
+so transition rates and other kinetic observables are covered, not only static
+ensemble averages.
+
+Importing kate, including from kate import pathbound, pulls in neither torch nor
+deeptime, so the pure-numpy code that evaluates the kinetic bound runs on a host
+with neither installed. The torch-backed components (flow, codec, runner,
+spline_flow, temporal_prior) and the deeptime-backed components (kinetics_deeptime,
+vampnet_cv) are imported lazily, on first attribute access or when the matching CLI
+subcommand runs. tests/test_no_eager_torch.py enforces this.
 """
 from __future__ import annotations
 
@@ -40,8 +36,8 @@ from .pathbound import (  # noqa: E402
     stationary_distribution,
 )
 
-# The following attributes are resolved lazily so that importing ``kate`` never
-# imports torch or deeptime. Each entry maps name -> (submodule, attribute).
+# Resolved lazily so that importing kate never imports torch or deeptime; each
+# entry maps name -> (submodule, attribute).
 _LAZY = {
     "KateCodec": ("codec", "KateCodec"),
     "KateArtifact": ("codec", "KateArtifact"),

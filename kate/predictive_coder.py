@@ -1,64 +1,42 @@
 """
-Learned Predictive Temporal Entropy Coding (T9)
-===============================================
-Background
-----------
-T9 is the lossy learned predictive entropy coder. T8 (temporal_prior) codes the
-flow latents losslessly against a learned causal conditional; T9 adds a lossy
-rate-distortion mode. The design rests on three decisions.
+Learned predictive temporal entropy coding of the flow latents (KATE stage T9).
 
-Predictor
----------
-A causal GRU over the flow latents outputs, at each step, a conditional Gaussian
-(mu_t, log sigma_t) for the next latent z_{t+1} given the reconstructed past. A
-GRU rather than a transformer is used so that the predictor remains
-streaming-compatible with T5 through an online hidden state, without a
-full-context window. A causal temporal-convolutional-network predictor is
-available via ``kind="tcn"``.
+Stage T8 codes the flow latents losslessly against a learned causal conditional;
+T9 keeps that machinery and adds a lossy rate-distortion mode. A causal predictor
+reads the reconstructed latent history z_{<=t} and emits a conditional Gaussian
+N(mu_t, sigma_t) for the next latent z_{t+1}. The mean and log-scale come from a
+GRU rather than a transformer, so the predictor stays streaming-compatible with
+the T5 online hidden state and needs no full-context window; a causal
+temporal-convolutional predictor is available through kind="tcn".
 
-Objective
----------
 The predictor is trained on the conditional negative log-likelihood of the next
-latent, rather than coordinate MSE. This is a tractable surrogate for the
-transition-kernel term of the path bound. The ensemble-term distortion is
-realized at coding time by the quantizer, and the rate-distortion curve sweeps
-it. Because the negative log-likelihood is only a surrogate, the gate measures
-the true observable error (collective-variable histogram KL, MSM
-implied-timescale error) and checks it against the path-space Pinsker bound; it
-is not inferred from the training loss.
+latent, not on coordinate mean-squared error. The conditional NLL is a tractable
+surrogate for the transition-kernel term of the path-space bound. The ensemble
+term of that bound is realized as distortion at coding time by the quantizer, and
+the rate-distortion curve sweeps it. Because the NLL is only a surrogate, the gate
+does not read distortion off the training loss: it measures the true observable
+error (collective-variable histogram KL, MSM implied-timescale error) and checks
+it against the path-space Pinsker bound.
 
-Residual coding
----------------
-The standardized innovation u = (z - mu)/sigma is quantized with subtractive
-dithering and entropy-coded against a unit Gaussian, with the quantizer bit-width
-as the rate parameter. Standardizing by the predicted scale renders the coded
-residual approximately unit-Gaussian regardless of frame, so where the predictor
-is confident (small sigma) a given bit-width buys finer z-fidelity and thus fewer
-bits at equal distortion. The T8 lossless coder is retained as the head-to-head
-baseline, and the lossy-over-lossless gain is measured on the same latents.
+Coding runs on the standardized innovation u = (z - mu)/sigma, quantized at a
+chosen bit-width with subtractive dithering and entropy-coded against a unit
+Gaussian; the bit-width is the rate parameter. Standardizing by the predicted
+scale makes the coded residual approximately unit-Gaussian frame to frame, so
+where the predictor is confident (small sigma) a fixed bit-width resolves z more
+finely and thus spends fewer bits at equal distortion. The loop is closed
+(differential pulse-code modulation, Cutler 1952): encoder and decoder both feed
+the reconstructed latents into the predictor, so they predict identically and
+decoding proceeds strictly frame by frame.
 
-Coding is closed-loop (DPCM, Cutler 1952): both encoder and decoder feed the
-reconstructed latents into the GRU, so they predict identically, and decoding
-proceeds strictly frame by frame.
-
-References
-----------
-The predictive and context-model entropy-coding methods are due to prior work and
-are cited here rather than claimed: differential pulse-code modulation (DPCM,
-Cutler 1952); the learned scale-hyperprior entropy model (Balle, Minnen, Singh,
-Hwang and Johnston, "Variational image compression with a scale hyperprior",
-ICLR 2018, arXiv:1802.01436); and the autoregressive context entropy model
-(Minnen, Balle and Toderici, "Joint Autoregressive and Hierarchical Priors for
-Learned Image Compression", NeurIPS 2018, arXiv:1809.02736). Exact citations are
-to be verified before publication. The GRU, flow, and collective variables are
-machinery; the contribution is the learned conditional entropy model, the
-bound-as-loss objective, and their integration.
-
-Scope
------
-The rate gain of T9 over T8 is empirical, measured on the trypsin-benzamidine set
-and reported against T8 rather than assumed. If T9 does not dominate T8 at equal
-observable error, that outcome is reported as observed.
+The predictive and context-model entropy coders are prior art and are cited, not
+claimed: differential pulse-code modulation (Cutler 1952); the learned
+scale-hyperprior entropy model (Balle, Minnen, Singh, Hwang, Johnston, ICLR 2018,
+arXiv:1802.01436); and the autoregressive context model (Minnen, Balle, Toderici,
+NeurIPS 2018, arXiv:1809.02736). The contribution is the conditional entropy
+model, the bound-as-loss objective, and their integration into the codec. The rate
+gain of T9 over T8 is measured on the trypsin-benzamidine set and reported against
+T8; if T9 does not dominate T8 at equal observable error, that is reported as
+observed.
 """
 from __future__ import annotations
 
@@ -72,10 +50,9 @@ from .codec import gaussian_cumfreq
 from .temporal_prior import _RangeEncoder, _RangeDecoder, _CausalConv1d
 
 
-# ============================================================================
-# 1. Predictors: causal GRU (default) and causal TCN, both predicting z_{t+1}
-#    from z_{<=t}. Interface: forward (teacher-forced) and advance (closed-loop).
-# ============================================================================
+# Predictors over the flow latents: a causal GRU (default) and a causal TCN, each
+# predicting z_{t+1} from z_{<=t}, with a forward (teacher-forced) and an advance
+# (closed-loop) interface.
 class CausalGRUPredictor(nn.Module):
     def __init__(self, dim: int, hidden: int = 64, n_layers: int = 1):
         super().__init__()
@@ -220,10 +197,8 @@ def static_gaussian_nll(z):
     return float((0.5 * z ** 2 + 0.5 * math.log(2 * math.pi)).mean())
 
 
-# ============================================================================
-# 2. Closed-loop standardized-innovation codec (lossy; bit-width is the rate
-#    parameter)
-# ============================================================================
+# Closed-loop standardized-innovation codec. The quantizer bit-width is the rate
+# parameter that trades bits against latent fidelity.
 def _dither(T, dim, step, seed):
     return np.random.default_rng(seed).uniform(-step / 2, step / 2, size=(T, dim))
 
@@ -291,9 +266,7 @@ def decode_predictive(data, T, dim, model, bits, U=8.0, seed=0):
     return zhat, levels
 
 
-# ============================================================================
-# 3. Rate-distortion accounting (T9) and the head-to-head with T8 (lossless)
-# ============================================================================
+# Rate-distortion accounting and the head-to-head against the T8 lossless coder.
 def rate_distortion_curve(z, model, bits_list, U=8.0, seed=0):
     """Compute the rate-distortion curve over a list of bit-widths.
 

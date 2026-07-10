@@ -1,49 +1,43 @@
 """
-KATE Codec for Kinetics-Preserving Compression
-===============================================
-This module implements the flow-based KATE codec, which compresses molecular
-configurations while preserving kinetic observables.
+The flow-based KATE codec, which compresses molecular configurations while
+preserving kinetic observables.
 
-Pipeline
---------
-1. Alignment and density estimation
-   Configurations are aligned by the Kabsch algorithm, and a normalizing flow density
-   p(x) is learned over them. The flow is exactly invertible, so kept frames are
-   reconstructed exactly, and a divergence measured in its Gaussian base space z
-   transfers to configuration space without a Gaussian-reference assumption.
+Configurations are Kabsch-aligned and a normalizing flow learns the density p(x)
+over the Cartesian vector x in R^{3N}, where N is the number of atoms. The flow is
+an exact diffeomorphism x <-> z onto a standard-normal base space z ~ N(0, I), so
+kept frames invert exactly and a Kullback-Leibler divergence measured in the
+Gaussian base transfers unchanged to configuration space, with no assumption that
+the data are Gaussian.
 
-2. Information-gain frame selection
-   The subset of frames whose base-space points best cover the density is retained, by
-   farthest-point sampling in z. This preferentially retains rare and transition states,
-   that is, frames of high thermodynamic information. This stage is lossy in the sense
-   that frames are discarded; the retained data are not corrupted, a representative
-   subset being chosen. Coverage sampling over-represents the low-density tails, so each
-   kept frame carries a stationary importance weight equal to the population of its
-   Voronoi cell in base space. The weights restore the empirical measure, so that
-   weighted averages over the kept subset are unbiased estimators of full-ensemble
-   averages; the raw (unweighted) subset is not.
+Frames are then thinned by farthest-point sampling in z, which maximizes coverage of
+the base measure and so preferentially keeps the rare and transition states that
+carry the most thermodynamic information per frame. The stage is lossy only in that
+frames are discarded; the kept frames themselves are untouched. Coverage sampling
+over-represents the low-density tails, so each kept frame carries a stationary
+importance weight w_i equal to the population of its Voronoi cell in base space. The
+weights restore the empirical measure, so that Sum_i w_i g(x_i) is an unbiased
+estimator of the full-ensemble average (1/T) Sum_t g(x_t), which the raw unweighted
+subset is not.
 
-3. Lossless entropy coding
-   The kept latents are coded losslessly against the flow's base density N(0, I). The
-   code length is the negative log-likelihood in bits, -log2 p(z). Gaussianization of
-   the data by the flow is what makes this coding inexpensive.
+The kept latents are entropy-coded losslessly against the base density N(0, I) at a
+cost of -log2 p(z) bits per sample, the negative log-likelihood; the flow's
+Gaussianization of the data is what makes the code short.
 
-4. The bound
-   A divergence between the compressed and original empirical measures bounds the error
-   of bounded observables through the Pinsker inequality. This is a static, ensemble
-   guarantee, and it applies to the stationary-reweighted kept subset (stage 2) or,
-   equivalently, to samples drawn from the flow density, not to the raw tail-biased
-   selection. Kinetic observables are not covered by it, so the MSM transition matrix is
-   retained separately as the dynamics term. The path-distribution KL is the sum of the
-   ensemble term and the transition term.
+The divergence between the compressed and original empirical measures bounds the
+error of any bounded observable f through the Pinsker inequality,
+TV(p, q) <= sqrt(KL(p||q)/2), which gives |E_p f - E_q f| <= 2 ||f||_inf TV(p, q)
+(Pinsker, Information and Information Stability of Random Variables and Random
+Processes, Holden-Day (1964)). This is a static ensemble guarantee and applies to the
+stationary-reweighted kept subset, or equivalently to samples drawn from the flow
+density, not to the raw tail-biased selection. Kinetic observables lie outside it, so
+the MSM transition matrix is retained separately as the dynamics term and the
+path-distribution KL is the sum of the ensemble term and this transition term.
 
-Scope
------
-This implementation runs the flow on the full, small Cartesian vector so that
-kept-frame reconstruction is exact. For a protein-scale system of size 3N of order
-5000, one would either train a larger flow on a GPU or reduce dimensionality first and
-accept loss in the discarded fast modes. The frame selector used here is
-farthest-point sampling, one concrete instance of an information-gain selector.
+The flow runs on the full Cartesian vector so that kept-frame reconstruction is
+exact. For a protein-scale system, 3N of order 5000, one would train a larger flow on
+a GPU or reduce dimensionality first and accept loss in the discarded fast modes. The
+frame selector here is farthest-point sampling, one concrete instance of an
+information-gain selector.
 """
 
 from __future__ import annotations
@@ -63,11 +57,10 @@ from .kinetic_codec import (
 )
 
 
-# ============================================================================
-# Static (i.i.d.) arithmetic coder: codes integer levels against a single fixed
-# probability mass function. The Witten-Neal-Cleary core matches that of the Markov
-# coder, using one cumulative-frequency table.
-# ============================================================================
+# Static (i.i.d.) arithmetic coder: integer levels against one fixed probability
+# mass function. The Witten-Neal-Cleary core (Witten, Neal & Cleary, Commun. ACM 30,
+# 520, 1987) is shared with the Markov coder, here driven by a single
+# cumulative-frequency table.
 
 def encode_iid(levels: np.ndarray, cum: np.ndarray) -> bytes:
     total = int(cum[-1])
@@ -139,9 +132,7 @@ def gaussian_cumfreq(L: int, zmax: float) -> np.ndarray:
     return _probs_to_cumfreq(p)
 
 
-# ============================================================================
 # Information-gain frame selection by farthest-point sampling in base space.
-# ============================================================================
 
 def igfs_select(z: np.ndarray, n_keep: int, seed: int = 0) -> np.ndarray:
     """Select frames by greedy farthest-point sampling in the flow's base space.
@@ -180,10 +171,6 @@ def stationary_reweight(z: np.ndarray, kept: np.ndarray) -> np.ndarray:
     counts = np.bincount(nearest, minlength=len(kept)).astype(np.float64)
     return counts / counts.sum()
 
-
-# ============================================================================
-# KATE codec
-# ============================================================================
 
 @dataclass
 class KateArtifact:

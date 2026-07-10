@@ -1,40 +1,27 @@
 """
-Normalizing Flow Density Model (RealNVP)
-========================================
+The RealNVP normalizing flow, KATE's learned density model over the slow
+collective variables.
 
-Background
-----------
-This module implements a RealNVP normalizing flow in PyTorch, providing the
-learned density model used by KATE. It replaces the linear PCA-whitening
-employed in earlier stages.
+A normalizing flow is an exact diffeomorphism x <-> z between the CV space and a
+standard-normal base space z, invertible by construction. The Kullback-Leibler
+divergence is invariant under an invertible map, so a divergence measured in the
+Gaussian base space transfers exactly to x and the path-space bound holds without
+assuming the CV data are Gaussian. The flow also yields a tractable density
+log p(x), which is both the information-gain signal for frame selection and the
+model the entropy coder writes against, at a cost of -log2 p(x) bits.
 
-A normalizing flow is an exact diffeomorphism x <-> z and is therefore invertible
-by construction, incurring no architectural information loss, in contrast to a
-lossy autoencoder. The Kullback-Leibler divergence is invariant under such a
-transformation, so a divergence bound measured in the Gaussian base space z
-transfers exactly to configuration space x. The bound consequently no longer
-depends on a Gaussian-reference assumption, which raw molecular-dynamics data
-violate, and instead becomes assumption-free. The flow additionally provides a
-tractable density log p(x), which defines the information-gain signal used for
-frame selection and serves as the model against which the entropy coder operates,
-the coding cost being -log2 p(x), the negative log-likelihood expressed in bits.
+The map is a stack of affine coupling layers (Dinh, Sohl-Dickstein, Bengio, ICLR
+2017). A layer splits the coordinates with a binary mask b; the frozen half x_b
+drives a network that outputs a per-dimension scale s and shift t, and the active
+half is transformed as y = x * exp(s) + t. The Jacobian is triangular, so
+log|det J| = sum(s) over the active dimensions and the inverse is closed form.
+Successive layers alternate the mask so every coordinate is transformed.
+Standardization x -> (x - mean) / std is folded in as a fixed affine layer, so
+log_prob is a proper density over the original coordinates.
 
-Affine coupling
----------------
-The affine coupling layer (RealNVP: Dinh et al., ICLR 2017) partitions the
-coordinates according to a binary mask b. The frozen half x_b conditions a network
-that produces a per-dimension scale s and shift t; the active half is transformed
-as y = x * exp(s) + t. The Jacobian log-determinant is log|det J| = sum(s) over
-the active dimensions, and the inverse is available in closed form. The masks
-alternate between successive layers so that every coordinate is transformed.
-
-Standardization, x -> (x - mean) / std, is folded into the flow as a fixed affine
-layer, so that log_prob is a proper density over the original coordinates.
-
-The self-test in __main__ verifies exact invertibility, the training negative
-log-likelihood on a three-well mixture, integration of the density to
-approximately unity on a grid, and the contrast between in-distribution and
-out-of-distribution log_prob values.
+The __main__ self-test checks exact invertibility, the training NLL on a
+three-well mixture, integration of the density to approximately unity on a grid,
+and the separation of in-distribution from out-of-distribution log_prob.
 """
 
 from __future__ import annotations
@@ -91,7 +78,6 @@ class RealNVP(nn.Module):
         self.register_buffer("mean_", torch.zeros(dim))
         self.register_buffer("std_", torch.ones(dim))
 
-    # ----- change of variables -----
     def forward(self, x):
         """Map x to the base variable z and return (z, total log|det J| of x -> z)."""
         z = (x - self.mean_) / self.std_
@@ -123,7 +109,6 @@ class RealNVP(nn.Module):
     def sample(self, n):
         return self.inverse(torch.randn(n, self.dim))
 
-    # ----- training -----
     def fit(self, X, epochs: int = 200, lr: float = 1e-3, batch: int = 256,
             weight_decay: float = 0.0, verbose: bool = True, seed: int = 0):
         torch.manual_seed(seed)

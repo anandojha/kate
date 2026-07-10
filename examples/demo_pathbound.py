@@ -1,28 +1,29 @@
 """
-demo_pathbound.py
-=================
-The central thesis, made measurable: preserving the ENSEMBLE does not preserve
-KINETICS, and the path-distribution decomposition (kate_pathbound) detects the
-difference the static ensemble bound misses.
+A worked check that preserving the equilibrium ensemble does not preserve the
+kinetics, and that the path-distribution bound of kate.pathbound resolves the
+difference the static ensemble bound cannot.
 
-Setup: a 3-state reversible chain P_ref (the "truth"). We build two "compressed"
-dynamics that share the SAME stationary distribution mu:
-  Q_slow : off-diagonal flow scaled by c < 1  (mu identical, kinetics slower) --
-           what an ensemble-only method can produce: right populations, wrong
-           rates.
-  Q_good : a tiny perturbation of P_ref -- what KATE's retained MSM gives.
+The reference dynamics is a three-state reversible chain P_ref with stationary
+distribution mu. Two "compressed" chains are built to share that same mu. The
+first, Q_slow, scales the symmetric off-diagonal flow S_ij by a factor c < 1.
+Detailed balance mu_i P_ij = mu_j P_ji survives a uniform scaling of the
+off-diagonal flux, so mu is untouched while every transition slows and the implied
+timescales stretch by roughly 1/c: the failure mode of an ensemble-only
+compressor, right populations with wrong rates. The second, Q_good, is a small
+perturbation of P_ref standing in for the MSM that KATE retains, so both mu and the
+rates match.
 
-It prints:
-  - ensemble term D(mu||mu) ~ 0 for BOTH -> the static bound would certify both;
-  - the TRANSITION term, large for Q_slow and ~0 for Q_good -> only the path
-    decomposition flags that Q_slow's kinetics are wrong;
-  - implied timescales: Q_slow off by ~1/c, Q_good matching.
-
-Exact (matrices, not sampling), so the numbers are the mechanism, not an
-estimate.
+Over a trajectory of L frames the path KL factorizes as
+D(rho_P || rho_Q) = D(mu_P || mu_Q) + (L - 1) h(P||Q), an ensemble term plus a
+transition term h in nats per step. Evaluated on the two chains the ensemble term
+D(mu || mu) is ~0 for both, so the static Pinsker bound certifies both as
+faithful, while the transition term is large for Q_slow and ~0 for Q_good and is
+the only quantity that exposes Q_slow's corrupted kinetics. The transition
+matrices are propagated exactly rather than sampled, so the printed numbers are
+the mechanism itself and not a finite-sample estimate.
 """
 import numpy as np
-from kate.pathbound import (report_kinetic_fidelity, stationary_distribution)
+from kate.pathbound import report_kinetic_fidelity, stationary_distribution
 
 
 def _stochastic(P):

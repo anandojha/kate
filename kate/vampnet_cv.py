@@ -1,33 +1,28 @@
 """
-Learned Nonlinear Slow Collective Variables (VAMPnets)
-======================================================
+Nonlinear slow collective variables from a VAMPnet.
 
-Background
-----------
-This module learns nonlinear slow collective variables (CVs) via VAMPnets, using
-deeptime's PyTorch VAMPNet implementation. It provides a drop-in alternative to the
-linear TICA CVs: a small network lobe is trained to maximize the VAMP score, the
-variational principle for Markov dynamics (VAMPnets: Mardt et al., Nat. Commun. 9, 5
-(2018)), after which the flow and MSM are run on the learned CVs rather than on TICA.
-This constitutes deep learning of molecular kinetics and improves the dynamics term
-directly.
+A VAMPnet learns a low-dimensional embedding chi(x) in R^d of the molecular features
+by maximizing the variational score of the dynamics it induces at lag time tau. From
+the instantaneous and time-lagged embeddings one forms the covariance matrices
+C_00 = <chi(x_t) chi(x_t)^T>, C_11 = <chi(x_{t+tau}) chi(x_{t+tau})^T> and
+C_01 = <chi(x_t) chi(x_{t+tau})^T>, and the Koopman matrix
+K = C_00^{-1/2} C_01 C_11^{-1/2}. The VAMP-r score is the sum of the r-th powers of
+the singular values sigma_i of K, VAMP-r = sum_i sigma_i^r. By the variational
+principle for Markov processes this score is bounded above by the value attained by
+the exact singular functions of the transfer operator, so maximizing it drives chi
+toward the true slow modes. The r = 2 score is the kinetic variance retained at lag
+tau and is the objective used here (Mardt, Pasquali, Wu, Noe, Nat. Commun. 9, 5
+(2018)).
 
-The overall design is preserved: the flow on the CVs remains invertible, the full-atom
-residual stage still recovers the fast modes through a fitted, CV-agnostic linear
-CV-to-coordinate decoder, and the path bound is unchanged. VAMPnets are prior art and
-are cited rather than claimed; only the integration and the kinetic bound are
-contributed here.
+The lobe is a small feed-forward network shared between the instantaneous and lagged
+views. The learned chi(x) feed the flow and the MSM, which otherwise run on the linear
+TICA coordinates, and the flow stays invertible on them. Lagged pairs are formed
+within each run and never across run boundaries. For binding kinetics the features are
+ligand-pocket contacts rather than raw Cartesian coordinates; the choice of features
+rests with the caller.
 
-For binding kinetics, the features are ligand-pocket contacts rather than raw Cartesian
-coordinates; the choice of features rests with the caller. The API has been verified
-against deeptime 0.4.5:
-
-    TrajectoryDataset(lagtime, traj) -> DataLoader
-    VAMPNet(lobe, device, learning_rate).fit(loader, n_epochs).fetch_model()
-    model.transform(traj);  VAMP(lagtime).fit_fetch(cvs).score(r=2)
-
-The deeptime import is guarded: deeptime is the optional [kinetics] extra, whereas torch
-is a core dependency.
+deeptime supplies the VAMPNet, VAMP, and TrajectoryDataset primitives as the optional
+[kinetics] extra, so its import is guarded while torch stays a core dependency.
 """
 from __future__ import annotations
 
@@ -89,10 +84,11 @@ def vampnet_cvs(runs_feat, lag, dim, *, hidden=32, n_epochs=30, batch=256, lr=5e
 
 
 def vamp_score(cvs, lag, r=2):
-    """Compute the VAMP-r score of a run-aware list of CV trajectories.
+    """VAMP-r score of a run-aware list of CV trajectories.
 
-    A higher score indicates that the CVs capture more of the slow dynamics. The score
-    is used to compare the VAMPnet CVs against the TICA baseline.
+    The score is sum_i sigma_i^r over the singular values sigma_i of the Koopman matrix
+    at lag tau; a larger value means the CVs retain more of the slow dynamics. Lagged
+    pairs stay within each run.
     """
     _require()
     cvs = [np.asarray(c, dtype=np.float64) for c in cvs]

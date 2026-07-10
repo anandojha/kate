@@ -1,37 +1,31 @@
 """
-Kinetic Rate-Distortion Training (T11)
-======================================
+Rate-distortion training of the KATE compressor against the kinetic path-bound.
 
-Background
-----------
-This module trains a KATE compressor with a rate-distortion objective whose distortion
-term is the differentiable kinetic path-bound (kate.bound_loss), placing the method in
-the neural-compression rate-distortion framework -- a learned analysis transform, a
-learned synthesis transform, and a rate-distortion Lagrangian (Balle et al., ICLR 2017;
-Minnen et al., NeurIPS 2018) -- with one substitution: the distortion is the path-space
-transition term h(P||Q), not coordinate mean-squared error.
+The compressor is fit to the rate-distortion Lagrangian rate + lambda * distortion, in the
+neural-compression setting of a learned analysis transform, a learned synthesis transform,
+and a rate-distortion objective (Balle et al., ICLR 2017; Minnen et al., NeurIPS 2018),
+with one substitution: the distortion is the path-space transition term h(P||Q) of the
+differentiable kinetic path-bound (kate.bound_loss), not coordinate mean-squared error.
 
 The analysis transform is the normalizing flow x -> z, quantization acts in the Gaussian
 base space, and the synthesis transform is the exact inverse flow z -> x. For a
-per-dimension quantization step Delta_d the expected code length is the flow-based rate,
+per-dimension quantization step Delta_d the expected code length is the flow-based rate
 
     rate(bits/frame) = E[ -log2 N(z) ] - sum_d log2 Delta_d ,
 
 differentiable through the flow. A learnable per-dimension log-width therefore performs a
 rate-distortion bit allocation across the latent: under the kinetic distortion it spends
-bits on the slow, kinetically decisive directions, and under coordinate mean-squared
-error it water-fills by amplitude. Sweeping the Lagrange multiplier lambda traces a
+bits on the slow, kinetically decisive directions, and under coordinate mean-squared error
+it water-fills by amplitude. Sweeping the Lagrange multiplier lambda traces the
 rate-versus-kinetic-distortion curve.
 
-Honest scope
-------------
-The differentiable transition term is a SURROGATE evaluated on soft VAMPnet states. The
-certified kinetics are still obtained separately, on hard states, from the deeptime
-reversible-maximum-likelihood MSM and the path bound (kate.pathbound); the hard-state
-folding-timescale error returned by ``hard_state_error`` is that honest check. "Rate
-distortion with a certificate" is therefore two objects -- a trained surrogate and a
-post-hoc certificate -- not one, and whether training on the bound beats training on
-mean-squared error is measured, not assumed (see examples/demo_rd_train.py).
+The differentiable transition term is a surrogate evaluated on soft VAMPnet states. The
+certified kinetics come separately, on hard states, from the deeptime reversible-maximum-
+likelihood MSM and the path bound (kate.pathbound), and the hard-state folding-timescale
+error returned by hard_state_error is that check. Rate distortion with a certificate is
+thus two objects, a trained surrogate and a post-hoc certificate, and whether training on
+the bound beats training on mean-squared error is measured rather than assumed (see
+examples/demo_rd_train.py).
 """
 from __future__ import annotations
 
@@ -119,8 +113,8 @@ def train_rd(compressor: KineticRDCompressor, CV, lam: float, kind: str = "kinet
     """Train the bit allocation by minimizing rate + lambda * distortion.
 
     ``kind`` selects the distortion: 'kinetic' for the differentiable transition term
-    (kate.bound_loss), or 'mse' for coordinate mean-squared error, the objective the
-    general-purpose compressors optimize. Only ``compressor.log_width`` is updated."""
+    (kate.bound_loss), or 'mse' for coordinate mean-squared error. Only
+    ``compressor.log_width`` is updated."""
     torch.manual_seed(seed)
     CV = torch.as_tensor(np.asarray(CV), dtype=torch.float32)
     opt = torch.optim.Adam([compressor.log_width], lr=lr)

@@ -1,46 +1,34 @@
 """
-Temporal Prior and Learned-Entropy Coding (T8)
-==============================================
-Background
-----------
-The flow Gaussianizes each frame, so the latents z_t are marginally distributed
-as N(0, I). Consecutive frames remain correlated, so the sequence z_1..z_T is not
-independent. A causal sequence model learns the conditional p(z_t | z_{<t}), and
-coding each latent against that learned conditional, a context model in the sense
-of learned image and video compression (Balle et al., ICLR 2018; Minnen et al.,
-NeurIPS 2018), shortens the code wherever frames are predictable relative to the
-fixed N(0, I) base.
+The temporal prior, KATE's causal sequence model over the flow latents, and the
+range coder that writes each frame against it.
 
-Scope
------
-This model changes only the entropy coder's probability model, and therefore only
-the code length. The flow, the reconstruction, and the KL/Pinsker bound are
-unchanged, and the coder remains exactly lossless, since arithmetic coding is
-exact regardless of the probability model used.
+The flow Gaussianizes each frame, so the latents z_t are marginally N(0, I), but
+consecutive frames stay correlated and the sequence z_1..z_T is not independent. A
+causal model of the conditional p(z_t | z_{<t}) captures that correlation, and
+coding each latent against the learned conditional (a context model in the sense
+of learned image and video compression, Balle et al., ICLR 2018; Minnen et al.,
+NeurIPS 2018) shortens the code by -log2 p(z_t | z_{<t}) bits wherever a frame is
+predictable relative to the fixed N(0, I) base.
 
-Losslessness
-------------
-Arithmetic coding desynchronizes if the encoder and decoder ever construct
-different probability tables for a symbol. The following conditions ensure exact
-inversion:
-  1. The conditional is predicted deterministically (CPU, float32, eval() mode,
-     with no dropout or nondeterministic operations).
-  2. The predicted Gaussian is discretized onto the same fixed grid as the
-     independent coder and converted through the same integer
-     ``_probs_to_cumfreq`` to an integer cumulative-frequency table. Coding is
-     performed against that integer table, so sub-ULP float variation that leaves
-     the table unchanged is harmless.
-  3. The context is the quantized reconstruction (dequantized levels), never the
-     original continuous z, so encode and decode condition on identical values.
-  4. Decoding proceeds strictly frame by frame, feeding each decoded latent back
-     as context.
-``encode_sequence`` and ``decode_sequence`` are exact inverses, as asserted in
-the tests.
+Only the entropy coder's probability model changes, so only the code length
+changes. The flow, the reconstruction, and the KL/Pinsker bound are untouched, and
+the coder stays exactly lossless because arithmetic coding is exact for any
+probability model.
 
-Rate
-----
+Exact inversion requires the encoder and decoder to build identical probability
+tables for every symbol, or the arithmetic coder desynchronizes. Four conditions
+secure this. The conditional is predicted deterministically (CPU, float32, eval
+mode, no dropout). The predicted Gaussian is discretized onto the same fixed grid
+as the independent coder and passed through the same integer _probs_to_cumfreq, so
+coding runs against an integer cumulative-frequency table and sub-ULP float
+variation that leaves the table unchanged is harmless. The context is the
+quantized reconstruction (dequantized levels), never the original continuous z, so
+encode and decode condition on identical values. Decoding proceeds strictly frame
+by frame, feeding each decoded latent back as context. encode_sequence and
+decode_sequence are exact inverses, as the tests assert.
+
 At 100 ps frame spacing consecutive frames are largely decorrelated, so the
-real-data gain may be modest. The synthetic test establishes the mechanism, that
+real-data gain may be modest. The synthetic test establishes the mechanism,
 rate(temporal) <= rate(gaussian) on a correlated sequence; the real-data gain is
 empirical.
 """
@@ -58,10 +46,9 @@ from .kinetic_codec import (_BitWriter, _BitReader, _HALF, _QUARTER, _3QUARTER,
                             _MASK, _PREC, _FREQ_TOTAL, _probs_to_cumfreq)
 
 
-# ============================================================================
-# 1. Causal sequence model: predict (mu_t, log_sigma_t) from z_{<t}
-# ============================================================================
 class _CausalConv1d(nn.Module):
+    """1D convolution left-padded by (k-1)*dilation so output t sees only inputs at or before t."""
+
     def __init__(self, ci, co, k, dilation):
         super().__init__()
         self.pad = (k - 1) * dilation
@@ -157,10 +144,9 @@ class TemporalPrior(nn.Module):
         return mu[0, t].double().numpy(), log_s[0, t].double().numpy()
 
 
-# ============================================================================
-# 2. Quantization grid (shared by encoder and decoder; matches
-#    codec.gaussian_cumfreq)
-# ============================================================================
+# The quantization grid shared by encoder and decoder. It matches
+# codec.gaussian_cumfreq so the temporal and independent coders discretize z on
+# identical edges into L levels spanning [-zmax, zmax].
 def _grid(L, zmax):
     return np.linspace(-zmax, zmax, L + 1)
 
@@ -188,9 +174,9 @@ def _cond_cumfreq(mu, log_s, edges):
     return _probs_to_cumfreq(p)
 
 
-# ============================================================================
-# 3. Stateful WNC range coder (per-symbol cumulative-frequency tables)
-# ============================================================================
+# A stateful arithmetic coder (Witten, Neal and Cleary, CACM 30, 520 (1987)): the
+# low/high interval carries across symbols, and each latent is coded against its
+# own predicted Gaussian through a per-symbol cumulative-frequency table.
 class _RangeEncoder:
     def __init__(self):
         self.w = _BitWriter(); self.low = 0; self.high = _MASK; self.pending = 0
@@ -246,9 +232,6 @@ class _RangeDecoder:
         return s
 
 
-# ============================================================================
-# 4. Sequence codec (exact inverses)
-# ============================================================================
 def encode_sequence(z, model: TemporalPrior, L: int, zmax: float) -> bytes:
     """Encode the latent sequence z (T, dim) against the learned conditional.
 
@@ -293,14 +276,11 @@ def decode_sequence(data: bytes, T: int, dim: int, model: TemporalPrior,
     return levels
 
 
-# ============================================================================
-# 5. Rate accounting (with and without the temporal model)
-# ============================================================================
 def gaussian_rate_bits_per_value(z, L, zmax):
     """Compute bits/value coding the quantized levels against the N(0, I) base.
 
-    This is the independent baseline coded against the fixed N(0, I) prior, as in
-    the current KATE coder.
+    This is the independent baseline: every level coded against the fixed N(0, I)
+    prior, with no temporal context.
     """
     from .codec import gaussian_cumfreq, encode_iid
     levels = quantize(np.asarray(z), L, zmax).ravel()

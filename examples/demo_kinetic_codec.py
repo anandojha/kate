@@ -1,24 +1,30 @@
 """
-demo_kinetic_codec.py
-=====================
-End-to-end demonstration on a SYNTHETIC metastable trajectory with KNOWN
-ground-truth kinetics, so we can check that kinetics are recovered from the
-compressed object.
+Kinetic codec demonstration on a synthetic metastable trajectory whose kinetics
+are known in closed form, so the rates recovered from the compressed object can
+be scored against the values that generated the data.
 
-These numbers are illustrative, not predictions for your real system. Absolute
-rates and RMSD on the 125 us trypsin-benzamidine trajectory must be measured
-there. What the demo establishes:
-  (1) the range coder achieves the MSM entropy-rate floor (near-optimal),
-  (2) the slowest implied timescale read off the STORED matrix matches the
-      ground-truth value used to generate the data (kinetics survive),
-  (3) coordinates reconstruct to ~thermal-fluctuation accuracy at low bit depth,
-  (4) the compression ratio is in line with fixed-rate quantization -- the
-      differentiator is analysis-nativeness + the bound, not the ratio itself.
+The trajectory is drawn from a three-macrostate Markov chain with line topology
+0-1-2 and rare hops, transition matrix P known exactly. Inside a macrostate a
+slow coordinate xi sits near its well center (-2, 0, +2) with a small intra-well
+spread; each atom is displaced along a fixed mode vector proportional to xi and
+then perturbed by fast Gaussian noise of scale sigma standing in for thermal
+fluctuation. The slow implied timescales follow from the eigenvalues of P as
+tau_k = -1 / ln(lambda_k), in frames, and the stationary well populations are
+the chain's stationary distribution.
 
-Generator: a 3-macrostate Markov chain (line topology, rare transitions, KNOWN
-transition matrix). Within a macrostate a slow coordinate xi sits near a well
-center (-2 / 0 / +2) with small intra-well spread; each atom is displaced along
-a fixed mode vector proportional to xi, plus fast Gaussian "thermal" noise.
+Four quantities are read against that ground truth. The range coder reaches the
+Markov entropy-rate floor of the state stream (Ekroot and Cover, IEEE Trans.
+Inf. Theory 39, 1418 (1993)), so the dynamics cost near the information-theoretic
+minimum. The slowest implied timescale taken directly from the stored transition
+matrix matches the generating value, so the kinetics survive compression with no
+coordinate decode. The coordinates reconstruct to near the thermal scale sigma
+at low bit depth. The compression ratio tracks plain fixed-rate quantization;
+the ratio is not the point, since what the codec buys is a compressed object the
+MSM estimators run on directly and a path-space bound on the retained kinetics.
+
+The numbers here are illustrative of the mechanism on a toy system. Absolute
+rates and RMSD for the 125 us trypsin-benzamidine trajectory have to be measured
+on that trajectory itself.
 """
 
 import numpy as np
@@ -29,7 +35,8 @@ WELLS = np.array([-2.0, 0.0, 2.0])
 
 
 def make_Ptrue(a=0.005):
-    """Per-frame 3-state transition matrix, line topology 0-1-2, rare hops."""
+    """Per-frame 3-state transition matrix P, line topology 0-1-2, with per-step
+    hop probability a into each adjacent well."""
     P = np.array([[1 - a, a, 0.0],
                   [a, 1 - 2 * a, a],
                   [0.0, a, 1 - a]])
@@ -37,6 +44,8 @@ def make_Ptrue(a=0.005):
 
 
 def slowest_timescale(P, lag=1):
+    """Slowest implied timescale of P, tau_2 = -lag / ln(lambda_2), where
+    lambda_2 is the second-largest eigenvalue. Returns tau_2 in units of lag."""
     ev = np.sort(np.real(np.linalg.eigvals(P)))[::-1]
     return -lag / np.log(np.clip(ev[1], 1e-12, 0.999999))
 
@@ -59,6 +68,8 @@ def simulate_run(n_steps, n_atoms, P, intra=0.25, noise=0.10, seed=0):
 
 
 def rmsd_superposed(A, B):
+    """Kabsch-superposed RMSD between two (n_atoms, 3) frames, after removing
+    each centroid and the optimal rotation R = argmin ||A R^T - B||."""
     A = A - A.mean(0); B = B - B.mean(0)
     H = A.T @ B
     U, _, Vt = np.linalg.svd(H)

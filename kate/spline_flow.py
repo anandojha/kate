@@ -1,34 +1,31 @@
 """
-Rational-Quadratic Neural Spline Flow
-=====================================
+The rational-quadratic neural spline flow, an expressive alternative to
+flow.RealNVP for KATE's learned density over the slow collective variables.
 
-Background
-----------
-This module provides a more expressive normalizing flow based on rational-quadratic
-neural-spline coupling (rational-quadratic neural spline: Durkan et al., NeurIPS
-2019), reimplemented from the published method. A monotonic piecewise
-rational-quadratic transform is substantially more flexible than the affine coupling
-of RealNVP, so it fits the latent density more closely. The improved fit yields a
-smaller Kullback-Leibler divergence and therefore a tighter Pinsker bound, while
-preserving exact invertibility: the spline is monotone by construction and admits a
-closed-form inverse.
+Each coupling layer replaces the affine map y = x * exp(s) + t with a monotonic
+piecewise rational-quadratic transform acting on the active coordinates. The
+support [-tb, tb] is split into K bins; the frozen half of the coordinates
+conditions a network that emits the K bin widths, K bin heights, and K-1 inner
+knot derivatives d_k > 0. On bin k the map is the ratio of two quadratics in the
+local coordinate theta = (x - x_k)/w_k on [0, 1], monotone because the knot
+derivatives are positive, so both the inverse and the Jacobian log-determinant
+log|dy/dx| are closed form. Outside [-tb, tb] the map is the identity: the inner
+derivatives are padded so the boundary derivative is exactly 1, matching the
+linear tails C1-continuously.
 
-RealNVP (flow.RealNVP) remains the reproducible default. SplineFlow is a drop-in
-alternative exposing the same forward, inverse, log_prob, sample, and fit interface,
-selected via ``kate compress --flow spline``.
+A rational-quadratic spline bends far more freely than a single affine scale and
+shift, so it tracks the base density more closely. The closer fit lowers the
+Kullback-Leibler divergence between the pushed-forward and standard-normal
+densities and so tightens the Pinsker path-space bound, while exact invertibility
+is retained. The construction follows Durkan et al., NeurIPS 2019.
 
-Neural spline flows, masked autoregressive flows, and equivariant flows constitute
-prior art and are cited rather than claimed; the architecture is not the principal
-contribution, which is the kinetic bound. The optional ``nflows`` extra provides a
-reference implementation for cross-checking. An SE(3)- or permutation-equivariant
-coupling conditioner, realized as a graph neural network rather than a grid
-convolutional network so that the density respects molecular symmetry, is a possible
-extension and is not implemented here.
+SplineFlow exposes the same forward, inverse, log_prob, sample, and fit interface
+as flow.RealNVP, so the codec and runner use it unchanged. The __main__ self-test
+checks exact invertibility before and after training on the three-well mixture of
+kate.flow.
 """
 from __future__ import annotations
-
 import math
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -43,29 +40,16 @@ def _searchsorted(bin_locations, inputs):
 
 
 def _rqs(inputs, uw, uh, ud, inverse, tail_bound):
-    """Evaluate the rational-quadratic spline on [-tb, tb].
+    """The monotonic rational-quadratic transform of Durkan et al. (NeurIPS
+    2019), with its log-Jacobian.
 
-    Implements the monotonic rational-quadratic transform of Durkan et al.
-    (NeurIPS 2019).
-
-    Parameters
-    ----------
-    inputs : Tensor
-        Values to transform, of shape (...,).
-    uw, uh, ud : Tensor
-        Unnormalized widths, heights, and inner derivatives, of shape (..., K),
-        (..., K), and (..., K-1) respectively.
-    inverse : bool
-        If True, apply the inverse transform.
-    tail_bound : float
-        Half-width tb of the spline support.
-
-    Returns
-    -------
-    outputs : Tensor
-        Transformed values.
-    logabsdet : Tensor
-        Log absolute Jacobian determinant of the transform.
+    The K bins carry unnormalized widths uw and heights uh, each of shape
+    (..., K), and K-1 inner knot derivatives ud of shape (..., K-1); tb =
+    tail_bound is the half-width of the support. A softmax maps uw, uh to the
+    bin widths and heights spanning [-tb, tb], and softplus maps ud to the
+    positive derivatives that keep the interpolant monotone. With inverse=True
+    the closed-form inverse is taken. Returns the transformed inputs and the log
+    absolute Jacobian determinant, negated on the inverse branch.
     """
     tb = tail_bound
     K = uw.shape[-1]
@@ -180,10 +164,12 @@ class RQSplineCoupling(nn.Module):
 
 
 class SplineFlow(nn.Module):
-    """Drop-in replacement for flow.RealNVP using rational-quadratic spline coupling.
+    """A stack of rational-quadratic spline coupling layers with a standard-normal
+    base, mirroring flow.RealNVP.
 
-    The interface (forward, inverse, log_prob, sample, fit) matches flow.RealNVP, so
-    the codec and runner use this class unchanged.
+    Standardization x -> (x - mean) / std is folded in as a fixed affine layer, so
+    log_prob is a proper density over the original coordinates. The forward,
+    inverse, log_prob, sample, and fit methods match flow.RealNVP.
     """
 
     def __init__(self, dim: int, hidden: int = 64, n_layers: int = 8, n_bins: int = 8):

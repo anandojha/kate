@@ -1,41 +1,39 @@
 """
-Kinetic-Fidelity Benchmark (T3 Contrast)
-========================================
-Background
-----------
-This module implements the T3 contrast, the central benchmark figure. The
-pipeline proceeds as follows:
+The T3 kinetic-fidelity contrast, KATE's central benchmark figure.
 
-  load trajectory
-    -> reconstruct with {KATE, baselines} (KATE retains its MSM; the baselines
-       reconstruct coordinates)
-    -> featurize with a common TICA and discretize against common k-means centers
-    -> estimate a reversible MSM per method on the same active-state support
-       (matched indexing)
-    -> score with kate_pathbound against the original MSM (ensemble term and
-       transition term)
-    -> tabulate and plot the implied timescales and transition term per method.
+Each compression method is scored by the path-space divergence between its
+recovered Markov dynamics and the original MSM. For a Markov model at lag tau the
+lag-tau joint rho(i,j) = mu(i) P(i,j) splits the KL divergence into a static and a
+dynamic part,
 
-Matched support
----------------
-A matched active set is used rather than deeptime's per-method largest connected
-set because the path bound compares P and Q entrywise, so every method's
-transition matrix must share the same state indexing. One active set is fixed
-(the largest connected set of the reference counts), and every method's
-reversible MSM is estimated on exactly those states via
-``estimate_reversible_T``, using the reversible maximum-likelihood estimator
-(deeptime) when installed and the pure-numpy (C + C^T)/2 fallback otherwise, so
-the contrast runs without additional dependencies. This carries the
-fair-comparison discipline of recipe T3 (same features, same centers, same lag)
-through to the estimator.
+    D(rho_P || rho_Q) = D(mu_P || mu_Q) + sum_i mu_P(i) D( P(i,.) || Q(i,.) ),
 
-Expected result
----------------
-Ensemble-only and coordinate-bounded methods exhibit a large transition term
-(their implied timescales drift), whereas the KATE transition term is
-approximately zero because it retains the MSM. The ensemble term is small for all
-methods, which is precisely why a static, ensemble-only bound would incorrectly
-certify the other methods as faithful.
+the ensemble term D(mu_P || mu_Q) in nats and the transition term
+h(P||Q) = sum_i mu_P(i) sum_j P_ij log(P_ij / Q_ij) in nats/step (kate.pathbound).
+Here P is the reference transition matrix, Q the method's re-estimated one, and mu
+the matching stationary vector. Rates, fluxes, and implied timescales are
+observables of consecutive pairs (x_t, x_{t+tau}), so they are controlled by the
+transition term and left free by the ensemble term alone.
+
+The pipeline holds the featurization fixed so every method is judged on the same
+footing. The reference trajectory is Kabsch-aligned, projected onto a common TICA,
+and discretized against one set of k-means centers, and a reversible MSM is
+estimated on it. Each baseline then reconstructs coordinates, is pushed through the
+same TICA and centers, and gets its own reversible MSM. KATE carries its MSM
+through the artifact, so for KATE Q = P and the transition term vanishes by
+construction.
+
+Because the path bound compares P and Q entrywise, both must share one state
+indexing. A single active set is fixed as the largest connected set of the
+reference counts, and every method's MSM is estimated on exactly those states via
+estimate_reversible_T, the reversible maximum-likelihood estimator (deeptime) when
+installed and the (C + C^T)/2 fallback otherwise, so the contrast runs with no
+extra dependencies.
+
+The reading: an ensemble-only or coordinate-bounded method keeps a small ensemble
+term but drifts to a large transition term, its implied timescales wandering off
+the reference, whereas KATE's transition term is ~0. A static bound that saw only
+the ensemble term would wrongly certify the drifting methods as faithful.
 """
 from __future__ import annotations
 
@@ -49,10 +47,8 @@ from . import baselines
 
 
 def _assign(CV, centers):
-    """Assign each frame to its nearest microstate center.
-
-    This projects a reconstruction onto the common discretization.
-    """
+    """Nearest-center assignment of each frame, projecting a reconstruction onto
+    the common k-means discretization."""
     from scipy.spatial import cKDTree
     return cKDTree(np.asarray(centers)).query(np.asarray(CV))[1].astype(np.int64)
 

@@ -1,20 +1,27 @@
 """
-demo_kate.py
-===========
-End-to-end flow-based KATE on synthetic metastable data with known ground truth.
+End-to-end run of flow-based KATE on synthetic metastable data.
 
-What it demonstrates (the abstract, made concrete and measured):
-  - the learned flow REPRODUCES THE ENSEMBLE: the free-energy profile and state
-    populations from samples of the trained flow match the full trajectory, and
-    the measured KL is small (this is the divergence the bound is built on);
-  - bounded observables obey the Pinsker envelope |dExpectation| <= sqrt(KL/2);
-  - kept frames reconstruct EXACTLY (flow is invertible), entropy-coded against
-    the Gaussian base;
-  - kinetics come from the separately retained MSM transition matrix (the
-    dynamics term the ensemble bound does NOT cover).
+The trajectory is a three-well Markov chain embedded in the Cartesian
+coordinates of a small atom cloud, so the slow collective variable and its
+stationary populations are known in closed form and every stage of the codec
+can be scored against that ground truth.
 
-Synthetic, illustrative numbers. The point is the mechanism and the bound, not
-absolute rates/ratios on this toy.
+The learned normalizing flow carries the stationary ensemble. The free-energy
+profile F(s) = -kT log p(s) and the state populations drawn from the trained
+flow track the full trajectory, and the Kullback-Leibler divergence
+KL(full || flow) along the slow CV, in nats, is the same divergence the
+path-space bound is built on. That bound is exercised through the Pinsker
+inequality: any observable bounded to [0, 1] can shift its expectation by at
+most sqrt(KL/2), which the indicator P(CV1 > mid) is checked against. The kept
+frames decode back to the input coordinates because the flow is an exact
+diffeomorphism, up to the quantization floor of the latents entropy-coded
+against the Gaussian base. The kinetics are read from the separately retained
+Markov-state-model transition matrix, the dynamical content the stationary
+bound does not constrain, and its two slowest implied timescales, in frames,
+are compared with the analytic eigenvalues of the generating chain.
+
+The rates and ratios here are illustrative of the mechanism on a toy system;
+what is under test is the bound and the exactness of the reconstruction.
 """
 
 import numpy as np
@@ -72,13 +79,14 @@ def main():
     print("=" * 68)
     ct = codec.fit_encode(runs, verbose=True)
 
-    # re-align to get the full coordinate matrix in the codec's frame
+    # Re-align every run into the codec's Kabsch frame to recover the full
+    # coordinate matrix.
     ref = None; aligned = []
     for r in runs:
         a, ref = kabsch_align(r, ref); aligned.append(a.reshape(a.shape[0], -1))
     X = np.concatenate(aligned, 0)
 
-    # ---- ENSEMBLE FIDELITY: flow samples vs full trajectory, in CV space ----
+    # Ensemble fidelity: flow samples against the full trajectory in CV space.
     with torch.no_grad():
         samp = ct.flow.sample(40000).numpy()
     cv_full = ct.tica.transform(X)[:, 0]
@@ -98,7 +106,7 @@ def main():
     print("  KL(full || flow) along CV1     : %.4f nats" % KL)
     print("  max |dF(CV1)| (populated range): %.3f kT" % dF.max())
 
-    # Pinsker check on a bounded observable: indicator CV1 > midpoint
+    # Pinsker check on the bounded observable 1[CV1 > mid].
     mid = 0.5 * (lo + hi)
     p_full = float((cv_full > mid).mean())
     p_samp = float((cv_samp > mid).mean())
@@ -108,7 +116,7 @@ def main():
     print("  Pinsker bound sqrt(KL/2)       : %.4f   -> satisfied: %s"
           % (pinsker, abs(p_full - p_samp) <= pinsker + 1e-9))
 
-    # ---- EXACT RECONSTRUCTION of kept frames ----
+    # Exact reconstruction of the kept frames, the flow being invertible.
     rec = KateCodec.decode_ensemble(ct)
     orig_kept = X[ct.kept_idx].reshape(-1, N_ATOMS, 3)
     rmsd = np.sqrt(((rec - orig_kept) ** 2).sum(2).mean(1))
@@ -119,7 +127,7 @@ def main():
     print("  max reconstruction RMSD        : %.5f nm (quantization-limited)"
           % rmsd.max())
 
-    # ---- COMPRESSION ACCOUNTING ----
+    # Compression accounting: artifact size against the raw coordinate stream.
     flow_bits = sum(p.numel() for p in ct.flow.parameters()) * 32
     coded_bits = len(ct.coded_latents) * 8
     msm_bits = ct.counts.size * 16 + ct.centers.size * 32 + ct.tica.eigvecs_.size * 32
@@ -135,7 +143,7 @@ def main():
     print("  (flow is a fixed cost; the ratio grows with trajectory length, and")
     print("   the ensemble is reproduced by the flow regardless of frames kept.)")
 
-    # ---- KINETICS from the retained MSM ----
+    # Kinetics from the retained MSM transition matrix.
     P = np.array([[0.99, 0.01, 0], [0.01, 0.98, 0.01], [0, 0.01, 0.99]])
     ev = np.sort(np.real(np.linalg.eigvals(P)))[::-1]
     gt = -1.0 / np.log(ev[1:3])

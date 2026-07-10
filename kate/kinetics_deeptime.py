@@ -1,45 +1,30 @@
 """
-Markov State Model Kinetics via deeptime
-========================================
-Background
-----------
-This module provides the reference Markov state model (MSM) kinetics estimators
-used to report timescales and rate observables. The reversible maximum-likelihood
-MSM and BayesianMSM are obtained from deeptime (Hoffmann et al., J. Chem. Phys.
-2021), in place of the symmetrized (C + C^T)/2 estimator in kinetic_codec. The
-symmetrized estimator is adequate as a coder illustration but is not a
-detailed-balance maximum-likelihood estimator and is therefore not used for
-reported kinetic quantities.
+Reference Markov state model (MSM) kinetics estimators, built on deeptime.
 
-Capabilities
-------------
-The deeptime backend supplies a reversible maximum-likelihood MSM, an
-implied-timescale convergence diagnostic via a lag scan, a BayesianMSM for
-sampled uncertainties on timescales, and a streaming TICA estimator whose
-covariance is accumulated through partial_fit so the collective-variable step
-scales beyond available memory. VAMPnets for nonlinear slow collective variables
-are available in deeptime but are not wrapped here.
+A discrete-state MSM approximates the dynamics on the slow collective variables by a
+row-stochastic transition matrix T(tau), where T_ij is the probability of finding the
+system in state j a lag time tau later given state i now. The estimators here are the
+reversible maximum-likelihood MSM and its Bayesian counterpart (Hoffmann et al.,
+J. Chem. Phys. (2021)), both of which impose detailed balance pi_i T_ij = pi_j T_ji with
+pi the stationary distribution. Detailed balance is the physically correct constraint for
+equilibrium MD, which is why the reversible MLE backs the reported quantities in place of
+the symmetrized (C + C^T)/2 count estimator: the latter is a serviceable coder
+illustration but not a maximum-likelihood estimate.
 
-Run handling
-------------
-Every estimator accepts a list of trajectories, one per run; deeptime tallies
-transitions within each trajectory and never across run boundaries, matching the
-convention in kinetic_codec.count_matrix.
+The dynamical observables follow from the spectrum of T. The k-th implied timescale is
+t_k = -tau / ln(lambda_k), where lambda_k is the k-th eigenvalue of T(tau) ordered
+1 = lambda_1 > lambda_2 >= ..., so t_k is the relaxation time of the k-th slowest process
+in units of the lag tau (frames here, converted to ns through the frame spacing dt). A
+valid MSM obeys the Chapman-Kolmogorov relation T(k*tau) = T(tau)^k, checked on PCCA+
+metastable sets, and yields mean first-passage times between those sets, from which rate
+constants follow as k ~ 1/MFPT.
 
-Implementation notes
---------------------
-The pipeline was verified against deeptime 0.4.5 with the following call
-sequence:
-    TransitionCountEstimator(lagtime, count_mode).fit_fetch(dtrajs).submodel_largest()
-    MaximumLikelihoodMSM(reversible=True).fit_fetch(count_model)        -> msm
-    BayesianMSM(reversible=True, n_samples=N).fit_fetch(count_model)    -> posterior.samples
-    KMeans(n_clusters, fixed_seed=seed).fit_fetch(X); model.transform(X)
-    TICA(lagtime, dim).partial_fit(run); model = est.fetch_model(); model.transform(run)
-    msm.timescales(k=...), msm.transition_matrix, msm.stationary_distribution
-These signatures have shifted across deeptime releases and should be re-checked
-after an upgrade. Imports are guarded: if deeptime is absent, calling any
-function raises an ImportError with installation instructions, so importing the
-package remains safe.
+Every estimator takes a list of trajectories, one per run, and tallies transitions only
+within a trajectory, never across run boundaries, matching kinetic_codec.count_matrix.
+TICA collective variables are accumulated run-by-run through partial_fit so the covariance
+never needs the full dataset in memory. deeptime is imported lazily: when it is absent
+each function raises an ImportError with install instructions and importing the package
+itself still succeeds.
 """
 
 from __future__ import annotations
@@ -58,18 +43,12 @@ except Exception as _e:                              # pragma: no cover
 
 
 def reversible_mle_from_counts(C, reversible=True):
-    """Estimate a reversible maximum-likelihood transition matrix from a count matrix.
+    """Reversible maximum-likelihood transition matrix T from a count matrix C.
 
-    The estimate is restricted to the largest connected set of the count matrix.
-    This is the detailed-balance maximum-likelihood estimator (deeptime), rather
-    than the (C + C^T)/2 symmetrization, and backs the reported timescales and
-    path bound via kinetic_codec.estimate_reversible_T when deeptime is available.
-
-    Returns
-    -------
-    tuple
-        (T_active, active_state_indices): the transition matrix on the active set
-        and the indices of those states in the original state space.
+    The estimate imposes detailed balance and is restricted to the largest connected
+    set of C, since states with no mutual transition statistics carry no information.
+    Returns (T_active, active_state_indices): the transition matrix on the active set
+    and the indices of those states in the original state space.
     """
     _require()
     import numpy as _np
@@ -88,15 +67,12 @@ def _require():
 def tica_cvs(runs_feat, lag, dim):
     """Fit streaming TICA on a list of per-run feature arrays.
 
-    Features may be aligned heavy-atom coordinates reshaped to (T, 3N) or contact
-    features. The covariance is accumulated run-by-run through partial_fit so the
-    full dataset need not reside in memory.
-
-    Returns
-    -------
-    tuple
-        (model, list_of_CV_trajectories): the fitted TICA model and the
-        transformed collective-variable trajectory for each run.
+    Time-lagged independent component analysis returns the linear collective variables
+    that decorrelate slowest at lag `lag`, the leading estimated eigenfunctions of the
+    transfer operator. Features may be aligned heavy-atom coordinates reshaped to (T, 3N)
+    or contact features. The covariance is accumulated run-by-run through partial_fit so
+    the full dataset need not reside in memory. Returns (model, list_of_CV_trajectories):
+    the fitted TICA model and its transformed collective-variable trajectory for each run.
     """
     _require()
     est = TICA(lagtime=int(lag), dim=int(dim))
@@ -110,11 +86,8 @@ def tica_cvs(runs_feat, lag, dim):
 def cluster(cv_runs, n_states, seed=0):
     """Discretize the pooled collective variables into k-means microstates.
 
-    Returns
-    -------
-    tuple
-        (dtrajs, model): the per-run discrete trajectories and the fitted
-        k-means model.
+    Returns (dtrajs, model): the per-run discrete trajectories and the fitted
+    k-means model.
     """
     _require()
     X = np.concatenate([np.asarray(c, dtype=np.float64) for c in cv_runs], axis=0)
@@ -140,7 +113,9 @@ def mlmsm(dtrajs, lag, reversible=True, count_mode="sliding"):
 
 
 def implied_timescales(dtrajs, lag, k=5, reversible=True):
-    """Return the k slowest implied timescales (in frames) at a single lag."""
+    """The k slowest implied timescales t_i = -lag/ln(lambda_i) (in frames) at a single
+    lag, from the eigenvalues lambda_i of the reversible-MLE transition matrix.
+    """
     return mlmsm(dtrajs, lag, reversible).timescales(k=k)
 
 
@@ -195,16 +170,14 @@ def kinetic_resolution(dtrajs, lag, dt_ns, k=5, n_samples=100,
                        rel_err_max=0.25, min_events=10, reversible=True):
     """Report which dynamical processes the trajectory can statistically resolve.
 
-    For each implied-timescale process the report gives the Bayesian timescale,
-    its 95% confidence interval, the relative uncertainty, and the number of
-    independent events the trajectory contains for that process (approximately
-    T_total / t_i, the number of round trips). A process is flagged ``resolved``
-    only when its Bayesian relative error is below ``rel_err_max`` and it has at
-    least ``min_events`` independent events; a compressor cannot be claimed to
-    preserve a kinetic observable that the source trajectory itself never sampled.
-    The argument ``dt_ns`` converts (strided) frames to nanoseconds. Reporting the
-    statistical resolution of the reference before comparing methods on it is a
-    discipline frequently omitted in the MD-compression literature.
+    For each implied-timescale process the report gives the Bayesian timescale, its 95%
+    confidence interval, the relative uncertainty, and the number of independent events
+    the trajectory contains for that process, n_events ~ T_total / t_i (the number of
+    round trips). A process is flagged ``resolved`` only when its Bayesian relative error
+    is below ``rel_err_max`` and it has at least ``min_events`` independent events: a
+    compressor cannot be credited with preserving a kinetic observable that the source
+    trajectory itself never sampled. The argument ``dt_ns`` converts (strided) frames to
+    nanoseconds.
 
     Returns
     -------
@@ -258,11 +231,11 @@ def format_resolution(report, total_us=None):
 def metastable_mfpt(dtrajs, lag, dt_ns, n_meta=2, count_mode="sliding", reversible=True):
     """Compute PCCA+ metastable sets and inter-set mean first-passage times.
 
-    The mean first-passage times yield the rate observables (k_on, k_off
-    approximately 1/MFPT) addressed by the path bound, computed directly from the
-    reversible maximum-likelihood MSM rather than only bounded. This expresses the
-    transition-term guarantee in the rate language used in the field. The deeptime
-    MFPT is in trajectory-step units and is converted to nanoseconds via ``dt_ns``.
+    PCCA+ coarse-grains the microstates into ``n_meta`` metastable sets, and the
+    mean first-passage time MFPT(i->j) between them gives the rate observables directly
+    from the reversible maximum-likelihood MSM, k_ij ~ 1/MFPT(i->j) (so k_on and k_off
+    for a two-set partition). The deeptime MFPT is in trajectory-step units and is
+    converted to nanoseconds via ``dt_ns``.
 
     Returns
     -------
@@ -316,12 +289,11 @@ def ck_test(dtrajs, lag, n_metastable=2, factors=(1, 2, 3, 4, 6),
     """Chapman-Kolmogorov test on metastable sets (Prinz et al., J. Chem. Phys. 134,
     174105, 2011).
 
-    A Markov state model estimated at lag tau predicts longer-lag behaviour through the
-    Chapman-Kolmogorov relation T(k*tau) = T(tau)^k. This routine estimates Bayesian MSMs
-    at lag times lag*factors, coarse-grains onto `n_metastable` PCCA+ sets, and compares
-    the model prediction against the direct estimate at each lag. Passing the test is the
-    community-standard evidence that the retained dynamics are Markovian; a reconstruction
-    that corrupts the kinetics fails it.
+    A Markov state model estimated at lag tau predicts its longer-lag behaviour through
+    the Chapman-Kolmogorov relation T(k*tau) = T(tau)^k. This routine estimates Bayesian
+    MSMs at lag times lag*factors, coarse-grains onto `n_metastable` PCCA+ sets, and
+    compares the model prediction T(tau)^k against the direct estimate T(k*tau) at each
+    lag; agreement is the standard evidence that the retained dynamics are Markovian.
 
     Parameters
     ----------

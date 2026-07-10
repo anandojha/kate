@@ -1,40 +1,34 @@
 """
-demo_bound_loss.py  --  T10: the kinetic path-bound used as a TRAINING LOSS.
-============================================================================
-This is the §2 sanity check for `kate.bound_loss`: it demonstrates the one place
-where the ML and the novel idea become the same thing -- a compressor's bit
-allocation trained to minimize the *kinetic* path-bound term instead of
-coordinate error.
+Bit allocation driven by the kinetic path-bound rather than coordinate error, on a
+controlled synthetic system, as a sanity check for kate.bound_loss.
 
-THE CONTROLLED SYSTEM (designed so the answer is knowable):
-  dim 0  = a slow, bistable folding coordinate -- LOW amplitude (sigma~0.3),
-           but it carries ALL of the slow kinetics. Well sampled (~470 folding
-           transitions over 120k frames), so the kinetics are signal, not noise.
-  dim 1-7 = fast white noise -- HIGH amplitude (sigma~1.0), kinetically IRRELEVANT.
+A fixed budget of B bits per frame is spread over the eight coordinates of a trajectory
+by one of two objectives. Raw-coordinate mean-squared error, (1/N) sum ||x - x_hat||^2,
+is what the general-purpose float compressors (SZ3, ZFP, MDZip) minimize; under a rate
+constraint it water-fills bits by amplitude and so tracks variance, not dynamics. The
+kinetic objective instead minimizes the differentiable transition term
+h(P||Q) = sum_i pi_i sum_j P_ij log(P_ij / Q_ij), the population-weighted relative
+entropy in nats per step between the reference soft-MSM transition matrix P and the
+quantized one Q at lag tau (kate.bound_loss; VAMPnets, Mardt et al., Nat. Commun. 9, 5
+(2018)).
 
-THE CONTRAST (a fixed total bit budget B/frame, allocated two ways):
-  "mse"  : minimize RAW-coordinate error -- exactly what SZ3/ZFP/MDZip minimize.
-           Water-fills bits by amplitude -> pours the whole budget into the fast
-           noise, spends ~0 bits on the low-amplitude slow coordinate.
-  "kin"  : minimize the differentiable transition term h(P||Q) of the soft MSM
-           (kate.bound_loss) -- discovers it must protect dim 0 and starve the rest.
+The system is built so the correct allocation is known. Coordinate 0 is a slow bistable
+folding mode of low amplitude (sigma ~ 0.3) that carries all of the slow kinetics, well
+sampled at ~470 folding transitions over 120k frames so the transition term is signal
+rather than sampling noise. Coordinates 1-7 are fast white noise of high amplitude
+(sigma ~ 1.0) and carry no kinetics. Amplitude and kinetic content are anti-correlated by
+construction, so the MSE objective spends ~0 bits on coordinate 0 and pours the budget
+into the fast noise, while the kinetic objective must protect coordinate 0 and starve the
+rest. At equal total rate the MSE kinetic distortion is flat in B, since the extra bits
+land on the wrong coordinate, whereas the bound-as-loss drives it down by ~100x at
+4 bits/frame.
 
-THE RESULT (printed below): at EQUAL total rate, raw-MSE's kinetic distortion is
-~flat in budget (more bits buy NO kinetic fidelity -- they go to the wrong place),
-while the bound-as-loss converts every bit into kinetic fidelity (~100x lower
-distortion at 4 bits/frame). This is the whole thesis -- "coordinate-error
-compression does not preserve kinetics; the path bound does" -- made trainable.
-
-HONEST SCOPE -- read this:
-  * This is a CONTROLLED SYNTHETIC system, built so the slow mode is low-amplitude
-    and well sampled. It demonstrates the MECHANISM, not a real-data win.
-  * On NTL9 the same experiment is INCONCLUSIVE: with ~6 folding events the soft
-    MSM's transition term is dominated by sampling noise, so the bound gives little
-    training signal. That is a sampling limit of that trajectory, not of the method.
-  * The certified kinetics in the paper still come from the deeptime reversible-MLE
-    MSM + the path bound on hard states (kate.pathbound). bound_loss is the
-    differentiable SURROGATE used as a loss; whether it beats MSE on real data is an
-    empirical question to be answered on a well-sampled system.
+The case is synthetic and isolates the mechanism. On NTL9 the same experiment is
+inconclusive: with ~6 folding events the soft-MSM transition term is dominated by
+sampling noise and carries little training signal, a limit of that trajectory rather than
+of the method. The certified kinetics reported in the paper come from the deeptime
+reversible maximum-likelihood MSM with the path bound evaluated on hard states
+(kate.pathbound); bound_loss is the differentiable surrogate used here as a loss.
 """
 import numpy as np
 import torch

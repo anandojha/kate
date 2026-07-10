@@ -1,32 +1,23 @@
 """
-On-Disk Format for a KATE Artifact
-===================================
-Background
-----------
-This module defines the persistent format of a KATE artifact, the compressed
-object that also serves as the substrate for downstream analysis. The schema is
-method-tag aware (cv / flow / entropy) so that the T6-T8 machine-learning variants
-can be incorporated without revision, and it is loadable without torch so that
-``kate bound`` (pure numpy) runs on a host with neither torch nor deeptime.
+The on-disk format for a KATE artifact, the compressed object that also serves as
+the substrate for downstream analysis.
 
-On-disk layout
---------------
-An artifact is a directory ``NAME.kate/`` containing three files:
+An artifact is a directory NAME.kate/ holding three files. config.json carries the
+scalars, method tags, flow architecture, and time metadata. arrays.npz carries the
+coded latents, kept indices, k-means centers, counts, the retained MSM, the
+run-aware all-frame dtraj (integer microstate labels), and the TICA parameters.
+flow.pt carries the torch state_dict of the flow, and is written only when a flow
+is present. Each stage carries a method tag (cv / flow / entropy) so the T6-T8
+variants slot into the schema without a format change, and the artifact loads
+without torch so that kate bound (pure numpy) runs on a host with neither torch
+nor deeptime installed.
 
-  config.json   scalars, method tags, flow architecture, and time metadata
-  arrays.npz    coded latents, kept indices, k-means centers, counts, the
-                retained MSM, the run-aware all-frame dtraj (integer labels),
-                and TICA parameters
-  flow.pt       torch state_dict of the flow, written only when a flow is present
-
-Rationale for storing the discrete trajectory
-----------------------------------------------
-The artifact stores the run-aware all-frame dtraj together with the k-means
-centers rather than a single count matrix. The subcommands ``analyze --lag-scan``,
-``analyze --bayes``, and ``benchmark`` re-estimate the MSM at many lag times,
-whereas a single count matrix supports only one. The per-frame dtraj and centers
-are compact and permit re-estimation at any lag without the original trajectory.
-The call ``load_artifact(path, with_flow=False)`` reads neither torch nor flow.pt.
+The kinetics term is stored as the run-aware all-frame dtraj together with the
+k-means centers, not as a single count matrix. A count matrix fixes a single lag
+time, whereas analyze --lag-scan, analyze --bayes, and benchmark re-estimate the
+MSM across many lags; the per-frame dtraj and centers are compact and let the MSM
+be re-estimated at any lag without the original trajectory. Loading with
+with_flow=False reads neither torch nor flow.pt.
 """
 from __future__ import annotations
 
@@ -112,7 +103,7 @@ class Artifact:
         """Reconstruct the RealNVP or spline flow from its architecture and state.
 
         Imports torch lazily. This method is intended for the compress/decompress
-        path and is not used by the ``bound`` subcommand.
+        path and is not used by the bound subcommand.
         """
         if self.flow_state is None:
             raise ValueError("artifact has no flow weights (loaded with_flow=False?)")
@@ -140,12 +131,8 @@ _CONFIG_KEYS = ("cv_dim", "L", "zmax", "n_keep", "run_lengths", "n_states", "lag
 
 
 def save_artifact(art: Artifact, path: str) -> str:
-    """Write the artifact to the directory ``path``, creating it if absent.
-
-    Returns
-    -------
-    str
-        The path that was written.
+    """Write the artifact to the directory path, creating it if absent, and
+    return that path.
     """
     os.makedirs(path, exist_ok=True)
     cfg = {k: getattr(art, k) for k in _CONFIG_KEYS}
@@ -195,8 +182,8 @@ def save_artifact(art: Artifact, path: str) -> str:
 def load_artifact(path: str, with_flow: bool = True) -> Artifact:
     """Load an artifact from disk.
 
-    When ``with_flow=False`` the loader reads neither torch nor flow.pt, which the
-    ``bound`` subcommand relies on so that the kinetic bound runs without torch or
+    With with_flow=False the loader reads neither torch nor flow.pt, which the
+    bound subcommand relies on so that the kinetic bound runs without torch or
     deeptime installed.
     """
     with open(os.path.join(path, "config.json")) as fh:

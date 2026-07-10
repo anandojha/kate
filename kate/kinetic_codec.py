@@ -1,61 +1,42 @@
 """
-Analysis-Native Compression of Molecular Dynamics Trajectories
-==============================================================
-Background
-----------
-This module stores a trajectory as its own validated kinetic model, so that the
-compressed object serves directly as the analysis substrate rather than as an
-opaque blob that must first be decompressed.
+Analysis-native compression of a molecular-dynamics trajectory stored as its own
+validated kinetic model.
 
-A trajectory is encoded as three components within a single artifact.
+A run is kept as three coupled parts, each of which is also a piece of the kinetic
+model, so the compressed object is the analysis substrate itself and is read without a
+decompression step.
 
-1. Linear slow-mode transform
-A linear slow-mode transform is applied, using TICA for kinetics and full-rank
-whitening for reconstruction. The whitening is an exactly invertible linear
-normalizing flow onto a Gaussian reference, so that a KL bound is preserved
-under it (the Gaussian-reference form of the KATE guarantee). A
-Boltzmann-generator-style flow may be substituted through the `Transform`
-interface to remove the Gaussian assumption.
+The configuration is first carried through an exactly invertible linear map. TICA
+supplies the slow collective variables that drive the kinetics, and full-rank PCA
+whitening (x - mu) V L^{-1/2}, where V and L are the eigenvectors and eigenvalues of
+the coordinate covariance, standardizes the coordinates onto a unit Gaussian reference.
+Whitening is a linear normalizing flow, and the Kullback-Leibler divergence is
+invariant under an invertible map, so the KATE path-space bound carries over in its
+Gaussian-reference form without assuming the CV data are Gaussian. A Boltzmann-generator
+flow may be supplied through the Transform interface where the Gaussian reference is too
+coarse.
 
-2. Discrete microstate sequence and MSM transition matrix
-A discrete microstate sequence is encoded together with its Markov state model
-transition matrix. The MSM acts as the entropy model: the state sequence is
-range-coded against the row-conditional transition probabilities, so its cost
-approaches the Markov-chain entropy rate
+The discrete microstate sequence is range-coded against its Markov state model. The MSM
+transition matrix T_ij is the entropy model: coding each state against its
+row-conditional probabilities drives the bit cost toward the Markov-chain entropy rate
 
-    H = -sum_i pi_i sum_j T_ij log2(T_ij)    [bits/step]
+    H = -sum_i pi_i sum_j T_ij log2(T_ij)    [bits/step],
 
-(Ekroot & Cover, IEEE Trans. Inf. Theory 39, 1418, 1993). Metastable systems
-have a small entropy rate, so the dynamics compress strongly. The same
-transition matrix coded against is the kinetic model itself (timescales, MFPT).
+where pi_i is the stationary weight of microstate i (Ekroot & Cover, IEEE Trans. Inf.
+Theory 39, 1418 (1993)). Metastable dynamics carry a small H, so the sequence compresses
+strongly, and the same T_ij coded against is the kinetic model itself, carrying the
+implied timescales and mean first-passage times.
 
-3. Per-state continuous residual
-A per-state continuous residual is quantized with a subtractive-dithered uniform
-scalar quantizer in the whitened space. Conditioning the residual on the
-microstate (per-state mean) reduces its magnitude, so structural correlations
-cost fewer bits. Subtractive dither keeps the reconstruction unbiased (preserving
-linear ensemble observables) and the reconstruction density continuous, so that
-the KL divergence is finite and the Pinsker inequality applies.
+The per-state continuous residual is quantized in the whitened space by a
+subtractive-dithered uniform scalar quantizer. Subtracting the per-state mean shrinks
+the residual, so structural correlation costs fewer bits. Subtractive dither leaves the
+reconstruction unbiased, preserving linear ensemble observables, and keeps the
+reconstruction density continuous, so the KL divergence stays finite and the Pinsker
+inequality applies to any bounded observable.
 
-Scope and prior art
--------------------
-The use of Markov models as entropy coders is established (textbook material;
-ONTRAC for GPS trajectories; FSAR for learned lossless coding). Neural latent
-compression of MD data (MDZip, the JCIM autoencoder, pcazip) and error-bounded MD
-compression (MDZ, SZ, ZFP, and quantity-of-interest-preserving variants) are also
-established. The contribution of this module is the unification of these elements:
-a single artifact that is simultaneously the kinetic model, a near-entropy-optimal
-code for the dynamics, and a generative decoder, governed by one distributional
-(KL, hence Pinsker) bound on arbitrary bounded observables rather than by
-pointwise-coordinate or finitely pre-selected quantity-of-interest bounds.
-
-Dependencies and conventions
----------------------------
-The core requires numpy, scipy, and scikit-learn; torch is not required. The
-input/output boundary is a list of (T_i, N, 3) float arrays, one per run; an
-OpenMM or DCD reader must produce that form, as the codec does not handle file
-formats. The codec is run-aware by construction: transition counts are tallied
-within runs and never across concatenation seams.
+The core needs only numpy, scipy, and scikit-learn. The input is a list of (T_i, N, 3)
+float arrays, one per run; file formats are a reader's concern, not the codec's, and
+transition counts are tallied within a run and never across a concatenation seam.
 """
 
 from __future__ import annotations
@@ -68,14 +49,11 @@ from typing import List, Optional, Tuple
 from sklearn.cluster import MiniBatchKMeans
 
 
-# ============================================================================
-# 1. Markov range coder  (Witten-Neal-Cleary integer arithmetic coder)
-# ============================================================================
-# Exact and reversible. The coder encodes a sequence of states against per-step
-# conditional distributions. For a first-order MSM there are only K distinct
-# conditionals (one per previous state) plus an initial distribution, so the K
-# integer cumulative tables are precomputed once and indexed by the previous
-# state.
+# The Markov range coder, an integer arithmetic coder in the Witten-Neal-Cleary
+# form, exact and reversible. It codes a state sequence against per-step
+# conditional distributions. A first-order MSM has only K distinct conditionals,
+# one per previous state, plus an initial distribution, so the K integer
+# cumulative tables are precomputed once and indexed by the previous state.
 
 _PREC = 32
 _WHOLE = 1 << _PREC          # 2^32
@@ -299,10 +277,6 @@ def decode_markov(data: bytes,
     return out
 
 
-# ============================================================================
-# 2. Rigid alignment (Kabsch)
-# ============================================================================
-
 def kabsch_align(frames: np.ndarray, ref: Optional[np.ndarray] = None
                  ) -> Tuple[np.ndarray, np.ndarray]:
     """Superpose each frame onto a reference by optimal rotation and translation.
@@ -340,10 +314,6 @@ def kabsch_align(frames: np.ndarray, ref: Optional[np.ndarray] = None
         out[t] = P @ R.T
     return out, ref
 
-
-# ============================================================================
-# 3. Transform interface + linear whitening + TICA
-# ============================================================================
 
 class Transform:
     """Invertible map between configuration space Y and latent space Z.
@@ -460,7 +430,6 @@ class TICA:
         c0 += 1e-9 * np.eye(c0.shape[0])
         return self._solve(c0, ct)
 
-    # ----- streaming / out-of-core fitting -----
     # The same C(0), C(tau), and mean as fit() are accumulated chunk by chunk, so
     # that the collective-variable step scales beyond available memory (e.g. via
     # md.iterload). Cross-chunk lagged pairs are preserved by carrying the last
@@ -510,10 +479,6 @@ class TICA:
     def transform(self, Y):
         return (np.asarray(Y, dtype=np.float64) - self.mean_) @ self.eigvecs_
 
-
-# ============================================================================
-# 4. Discretization (run-aware) + MSM
-# ============================================================================
 
 def discretize(runs_feat: List[np.ndarray], n_states: int, seed: int = 0
                ) -> Tuple[List[np.ndarray], np.ndarray]:
@@ -680,10 +645,6 @@ def entropy_rate(T: np.ndarray, pi: np.ndarray) -> float:
     return float(-(pi[:, None] * T * logT).sum())
 
 
-# ============================================================================
-# 5. Subtractive-dithered uniform scalar quantizer (per-state)
-# ============================================================================
-
 @dataclass
 class DitheredResidualCodec:
     """Quantize whitened residuals with a fixed step and subtractive dither.
@@ -714,10 +675,6 @@ class DitheredResidualCodec:
         return q.astype(np.float64) * step - d
 
 
-# ============================================================================
-# 6. End-to-end codec
-# ============================================================================
-
 @dataclass
 class CompressedTrajectory:
     """The single compressed artifact.
@@ -742,7 +699,6 @@ class CompressedTrajectory:
     seed: int                      # dither seed (must match for exact decode)
     counts: np.ndarray = None      # raw count matrix (for connectivity, bootstrap)
 
-    # ----- analysis directly from the compressed object, without decompression -----
     def kinetics(self, k: int = 5):
         """Compute kinetics on the largest ergodic set.
 
@@ -787,7 +743,7 @@ class KineticCodec:
         CompressedTrajectory
             The compressed artifact.
         """
-        # ----- align and flatten -----
+        # Align each run to a shared reference and flatten to (T_i, 3N).
         ref = None
         aligned = []
         for r in runs:
@@ -795,24 +751,24 @@ class KineticCodec:
             aligned.append(a.reshape(a.shape[0], -1))   # (T_i, 3N)
         run_lengths = [a.shape[0] for a in aligned]
 
-        # ----- whitening (reconstruction transform; linear flow) -----
+        # Whitening is the reconstruction transform, an invertible linear flow.
         wh = WhiteningTransform().fit(np.concatenate(aligned, axis=0))
         white_runs = [wh.forward(a) for a in aligned]   # (T_i, d), with d = 3N here
         d = white_runs[0].shape[1]
 
-        # ----- TICA slow modes used as discretization features -----
+        # TICA slow modes are the discretization features.
         tica = TICA(lag=self.tica_lag, n_components=self.tica_dim)
         tica.fit(white_runs)
         tica_runs = [tica.transform(w) for w in white_runs]
 
-        # ----- run-aware microstate discretization -----
+        # Cluster the slow modes into microstates.
         labels, centers = discretize(tica_runs, self.n_states, self.seed)
 
-        # ----- MSM serving as both entropy model and kinetic model -----
+        # The MSM is both the entropy model and the kinetic model.
         C = count_matrix(labels, self.n_states, self.msm_lag)
         T, pi = transition_matrix(C, self.reversible)
 
-        # ----- per-state means in whitened space, used as a structural prior -----
+        # Per-state means in whitened space act as a structural prior.
         all_white = np.concatenate(white_runs, axis=0)
         all_lab = np.concatenate(labels, axis=0)
         state_means = np.zeros((self.n_states, d))
@@ -821,13 +777,13 @@ class KineticCodec:
             if m.any():
                 state_means[s] = all_white[m].mean(axis=0)
 
-        # ----- residuals and dithered quantization -----
+        # Residual about the per-state mean, then dithered quantization.
         residual = all_white - state_means[all_lab]
         step = (residual.std() + 1e-12) * (2.0 ** (1 - self.n_bits)) * 3.0
         codec = DitheredResidualCodec(n_bits=self.n_bits, seed=self.seed)
         q = codec.quantize(residual, step)
 
-        # ----- range-code each run's state sequence against T, with pi as init -----
+        # Range-code each run's state sequence against T, with pi as the initial law.
         coded = [encode_markov(seq, T, pi) for seq in labels]
 
         return CompressedTrajectory(
@@ -862,7 +818,6 @@ class KineticCodec:
             off += n
         return out
 
-    # --------------------------------------------------------------------- #
     @staticmethod
     def report(ct: CompressedTrajectory) -> dict:
         """Compute the bit accounting for the compressed artifact.

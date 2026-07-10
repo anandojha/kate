@@ -1,34 +1,33 @@
 #!/usr/bin/env python
 """
-Trajectory and Topology Inspection
-==================================
-Background
-----------
-This module characterizes a DCD trajectory and its topology prior to
-compression.
+Pre-compression inspection of a DCD trajectory and its topology.
 
-Usage
------
-  python inspect_traj.py TOP DCD
-  python inspect_traj.py TOP DCD --compress [--stride N] [--lag L] [--nbits B] [--nstates S]
+kinetic_codec expects a clean coordinate set and a known sampling interval, so a
+trajectory is characterized before it is compressed. Streaming over the file, so
+the whole set is never held in memory, the frame count is tallied and the topology
+is reduced to its atom, residue, and chain counts and to a residue composition, in
+which any residue outside the standard amino acid, water, and ion tables is flagged
+as a ligand or ion candidate. A handful of atom selections are then probed so the
+stored set can be chosen.
 
-The default inspection reports the frame count; atom, residue, and chain counts;
-residue composition (with non-standard residues flagged as ligand or ion
-candidates); candidate atom selections; a units sanity check based on the
-nearest-neighbor distance (MDTraj reports nanometers); the saved time step; and
-the memory footprint together with a 125 us extrapolation.
+Units are read from the geometry rather than trusted from the header. Among the
+heavy atoms the nearest neighbor is a bonded pair, whose separation is ~0.10-0.15
+nm (1.0-1.5 Angstrom), so a median nearest-neighbor distance near 0.1 marks
+nanometer coordinates while one near 1.5 marks Angstrom. MDTraj reports
+Trajectory.xyz in nanometers and .time in picoseconds, and the saved step dt is
+taken as the median frame-to-frame gap.
 
-The ``--compress`` mode builds the run list (a single continuous run unless split
-manually) and runs kinetic_codec on the optionally strided heavy atoms of the
-protein and ligand, reporting the compression ratio, reconstruction RMSD relative
-to the per-atom RMSF, and the kinetics.
+The memory footprint follows from the stored set. Holding the N heavy protein and
+ligand atoms costs 3N float32 = 12N bytes per frame, so a run of n_frames frames
+costs 12*N*n_frames bytes, and extrapolation to 125 us at a fixed save rate scales
+this by 125000 ns / total_ns. The whitening covariance is (3N)^2 entries and its
+eigendecomposition is O((3N)^3), so once 3N passes a few thousand a low-rank or
+strided fit is needed.
 
-Implementation notes
---------------------
-Written for MDTraj 1.11. The following APIs should be verified in the target
-environment: load_topology; iterload(chunk, stride, atom_indices); the
-Topology.select selection language; and Trajectory.xyz (nanometers) and .time
-(picoseconds).
+With --compress the optionally strided heavy atoms are handed to kinetic_codec as a
+single continuous run, and the compression ratio, the reconstruction RMSD measured
+against the per-atom RMSF (the thermal fluctuation scale), and the implied
+timescales are reported.
 """
 import argparse
 import numpy as np
@@ -55,10 +54,9 @@ def classify(name):
 
 
 def heavy_indices(topo, resnames=None):
-    """Return heavy (non-hydrogen) atom indices, optionally restricted by residue.
-
-    The selection is performed in Python to avoid fragility in the selection
-    language.
+    """Heavy (non-hydrogen) atom indices, optionally restricted to a set of
+    residue names. The filter runs in Python rather than through the topology
+    selection language, whose grammar shifts between MDTraj versions.
     """
     out = []
     for a in topo.atoms:
@@ -79,7 +77,6 @@ def inspect(top_path, dcd_path):
     print("  atoms / residues / chains : %d / %d / %d"
           % (topo.n_atoms, topo.n_residues, topo.n_chains))
 
-    # Residue composition by class.
     by_class = {"protein": [], "water": [], "ion": [], "other": []}
     name_counts = {}
     for r in topo.residues:
@@ -95,7 +92,6 @@ def inspect(top_path, dcd_path):
     else:
         print("  (no non-standard residues -- ligand may be named as standard?)")
 
-    # Candidate atom selections.
     print("-" * 70)
     print("CANDIDATE SELECTIONS  (atom counts)")
     trials = [("protein", "protein"), ("protein & CA", "protein and name CA"),
@@ -143,7 +139,6 @@ def inspect(top_path, dcd_path):
         print("  unitcell lengths (frame0) : %s  (0 or absent => solvent stripped)"
               % np.round(b0, 3))
 
-    # Save interval.
     dt_ns = None
     if times:
         t = np.concatenate(times)

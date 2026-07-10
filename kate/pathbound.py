@@ -1,73 +1,51 @@
 """
-Kinetic Path-Distribution Bound for the KATE Guarantee
-=======================================================
-Background
-----------
-This module provides the kinetic component of the KATE guarantee: a divergence
-defined on the trajectory (path) distribution rather than only on the static
-ensemble. It extends the analytic guarantee to kinetic observables, which the
-static ensemble Pinsker bound does not cover.
+The kinetic path-distribution bound behind the KATE guarantee.
 
-Motivation
-----------
-The ensemble bound implemented in kate.py controls observables of single
-configurations,
+The ensemble bound of kate.py controls observables of single configurations
+through Pinsker, |E_P[f] - E_Q[f]| <= sqrt( D(mu_P || mu_Q) / 2 ) for f in [0, 1],
+where mu_P and mu_Q are the two stationary distributions and D(.||.) is the
+Kullback-Leibler divergence in nats. It says nothing about dynamics. Two ensembles
+with the same stationary mu can carry arbitrarily different transition rates, so
+matching mu alone (a collective-variable histogram, a TICA-projection density)
+leaves k_on, k_off, mean first-passage times and implied timescales unconstrained.
 
-    |E_P[f] - E_Q[f]| <= sqrt( D(mu_P || mu_Q) / 2 )    for f in [0, 1],
-
-but it provides no control over kinetics. Two ensembles with identical stationary
-distributions can have arbitrarily different transition rates, so preserving the
-stationary distribution mu (as an ensemble-matching autoencoder does when it
-matches a collective-variable histogram or a TICA-projection distribution) does
-not preserve k_on, k_off, mean first-passage times, or implied timescales.
-
-Path-KL factorization
----------------------
-For a Markov model at lag tau, the path-distribution KL divergence factorizes
-exactly into an ensemble term and a transition (dynamics) term. With the lag-tau
-joint distributions
-
-    rho_P(i,j) = mu_P(i) P(i,j),    rho_Q(i,j) = mu_Q(i) Q(i,j),
-
-the divergence is
+The remedy is to bound the divergence of the trajectory (path) distribution rather
+than the static one. For a Markov model at lag tau the path KL factorizes exactly,
+by the chain rule of relative entropy (Cover and Thomas, Elements of Information
+Theory). With the lag-tau joint distributions rho_P(i,j) = mu_P(i) P(i,j) and
+rho_Q(i,j) = mu_Q(i) Q(i,j),
 
     D(rho_P || rho_Q) = D(mu_P || mu_Q)                       (ensemble term)
-                      + sum_i mu_P(i) D( P(i,.) || Q(i,.) )    (transition term).
+                      + sum_i mu_P(i) D( P(i,.) || Q(i,.) )    (transition term),
 
-Over a full trajectory of L consecutive frames under stationary Markov dynamics,
+and over a trajectory of L consecutive frames under stationary dynamics the two
+terms separate as
 
     D(path_P || path_Q) = D(mu_P || mu_Q) + (L - 1) h(P||Q),
     h(P||Q) = sum_i mu_P(i) sum_j P(i,j) log( P(i,j) / Q(i,j) )    [nats/step].
 
-The Pinsker inequality applied to the joint then bounds any bounded observable of
-consecutive pairs (x_t, x_{t+tau}),
+Here P and Q are the row-stochastic transition matrices of the reference and the
+reconstruction, mu their stationary vectors, and h the transition (dynamics) term
+in nats per step. Applying Pinsker (Pinsker 1964) to the joint bounds any observable
+of consecutive pairs (x_t, x_{t+tau}),
 
     |E_P[g] - E_Q[g]| <= sqrt( D(rho_P || rho_Q) / 2 )    for g in [0, 1].
 
-Transition fluxes and counts, which determine rates, are exactly such pairwise
-observables, so this constitutes a kinetic guarantee; the ensemble term alone does
-not.
+Transition fluxes and counts, which fix the rates, are exactly such pairwise
+observables, so the joint bound is a kinetic guarantee where the ensemble term
+alone is not.
 
-Role within KATE
-----------------
-KATE retains the MSM transition matrix, so for the KATE artifact itself Q = P on
-the retained dynamics and the transition term is approximately zero by
-construction, i.e. KATE preserves kinetics. The principal role of this module is
-to serve as the reference measure for the contrast experiment: given any
-compressor's reconstruction, its MSM Q is re-estimated at the same discretization,
-and the ensemble term D(mu_P || mu_Q) is reported against the transition term. An
-ensemble-only method shows an ensemble term near zero but a positive transition
-term, indicating corrupted kinetics that the static bound would have incorrectly
-certified as faithful. This contrast is the central result of the accompanying
-work.
+KATE keeps the MSM transition matrix, so on the retained dynamics Q = P, the
+transition term vanishes by construction, and the kinetics are preserved. The
+module's other role is as the reference measure for the contrast: an ensemble-only
+compressor, its MSM Q re-estimated at the same discretization, shows a near-zero
+ensemble term beside a positive transition term, the signature of corrupted
+kinetics that the static bound would have certified as faithful.
 
-Scope and conventions
---------------------
-The factorization assumes a Markov model at the chosen lag (the MSM assumption
-already made for kinetics) together with stationary statistics. The result should
-be reported alongside an implied-timescale lag scan rather than as a
-lag-independent certificate. All KL divergences are expressed in nats. The
-implementation uses only numpy; torch and deeptime are not required.
+The factorization holds under the Markov assumption at the chosen lag together with
+stationary statistics, so the result is read alongside an implied-timescale lag
+scan rather than as a lag-independent certificate. Every divergence here is in
+nats, and only numpy is required.
 """
 
 from __future__ import annotations

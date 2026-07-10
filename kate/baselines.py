@@ -1,37 +1,28 @@
 """
-Baseline Compressors for the Kinetic-Fidelity Contrast
-======================================================
-Background
-----------
-This module provides the external compressors against which KATE is benchmarked
-(the T3 contrast), together with local pseudo-baselines that allow the contrast
-harness to run end-to-end in any environment.
+Baseline compressors for the kinetic-fidelity contrast.
 
-External baselines
-------------------
-The external baselines (MDZip, SZ3, ZFP) build and run in their own environments
-on the cluster, where the trypsin-benzamidine data resides. Their source is not
-vendored; each is invoked as a subprocess. Every wrapper locates the tool through
-an environment variable (or PATH) and raises ``BaselineUnavailable`` with an
-explanatory message when the tool is not configured. The subprocess command
-structure is scaffolded, and each tool's command-line interface should be
-verified before a production run, as the flags vary by version.
+KATE is benchmarked (the T3 contrast) against external MD-trajectory compressors
+and against two local pseudo-baselines that make the harness runnable end-to-end
+in any environment. The contrast asks whether a method preserves the kinetics,
+the state-to-state transition times that set the rates, or only the static
+ensemble, since a compressor can reproduce the equilibrium distribution of
+coordinates while scrambling the dynamics that ride on top of it.
 
-Local pseudo-baselines
----------------------
-The local pseudo-baselines run anywhere without external tools and demonstrate
-the contrast:
-  * 'shuffle'  : an independent resample of frames that preserves the ensemble
-                 exactly while destroying all temporal correlation. This is the
-                 limiting case of an ensemble-preserving, kinetics-destroying
-                 method, which an ensemble-only method approaches.
-  * 'quantize' : rounding of coordinates to a coarse grid, a pointwise-bounded
-                 round-trip in the SZ/ZFP family that blurs state boundaries so
-                 the kinetics drift while the ensemble is approximately preserved.
+The external baselines MDZip, SZ3 and ZFP build and run in their own environments
+on the cluster, alongside the trypsin-benzamidine data. Their source is not
+vendored, so each is invoked as a subprocess. A wrapper locates the tool through
+an environment variable (or PATH) and raises BaselineUnavailable when the tool is
+not configured. The subprocess flags vary by tool version and are verified
+against the installed CLI before a production run.
 
-These pseudo-baselines stand in for the figure mechanics and are not claims about
-the real baselines' numbers, which come from the MDZip/SZ3/ZFP runs on the
-cluster.
+The two local pseudo-baselines bracket the contrast. 'shuffle' resamples frames
+independently, preserving the ensemble exactly while destroying all temporal
+correlation, the limiting case that an ensemble-only method approaches.
+'quantize' rounds coordinates onto a coarse grid, the pointwise-bounded
+round-trip of the SZ/ZFP family, which blurs state boundaries so the kinetics
+drift while the ensemble stays approximately preserved. These stand in for the
+figure mechanics and are not claims about the real baselines' numbers, which come
+from the MDZip/SZ3/ZFP runs on the cluster.
 """
 from __future__ import annotations
 
@@ -74,9 +65,6 @@ def _require_external(method: str) -> str:
     return path
 
 
-# --------------------------------------------------------------------------- #
-# Local pseudo-baselines
-# --------------------------------------------------------------------------- #
 def pseudo_shuffle(coords: np.ndarray, seed: int = 0) -> np.ndarray:
     """Resample frames independently, preserving the ensemble but destroying kinetics."""
     rng = np.random.default_rng(seed)
@@ -93,9 +81,7 @@ def pseudo_quantize(coords: np.ndarray, decimals: int = 1) -> np.ndarray:
     return np.round(np.asarray(coords), decimals=decimals)
 
 
-# --------------------------------------------------------------------------- #
-# External baselines (subprocess, cluster-side). Scaffolds; verify each CLI.
-# --------------------------------------------------------------------------- #
+# External baselines run as subprocesses on the cluster; verify each tool's CLI before use.
 def run_sz3(coords: np.ndarray, abs_err: float = 1e-2) -> np.ndarray:
     """Run an SZ3 pointwise error-bounded round-trip on float32 coords (ABS mode)."""
     binp = _require_external("sz3")
@@ -135,7 +121,7 @@ def run_mdzip(coords: np.ndarray, top: str = None, **kw) -> np.ndarray:
 
 
 def reconstruct(method: str, coords: np.ndarray, **kw) -> np.ndarray:
-    """Round-trip ``coords`` (T, N, 3) through a baseline and return the result.
+    """Round-trip coords (T, N, 3) through a baseline and return the result.
 
     Local pseudo-baselines run in any environment; external baselines require
     their configured tool.

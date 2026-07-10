@@ -1,9 +1,6 @@
 """
-Command-Line Interface
-======================
-Background
-----------
-This module provides the single ``kate`` entry point and its subcommands:
+The ``kate`` command-line entry point and its five subcommands, which cover the
+pipeline end to end:
 
   kate compress   TOP DCD -o ART      align -> CV/flow -> IGFS -> entropy code + MSM
   kate decompress ART -o OUT          flow inverse for kept frames (+T4 full-atom)
@@ -11,10 +8,10 @@ This module provides the single ``kate`` entry point and its subcommands:
   kate bound      ART REF             ensemble term, transition term, Pinsker pair/path
   kate benchmark  TOP DCD             KATE vs MDZip/SZ3/ZFP, scored by the path bound      [T3]
 
-Imports are deferred per subcommand. The module top level imports only argparse,
-and each handler imports only the components it requires. Consequently
-``kate bound`` (pure numpy) imports neither torch nor deeptime, so the kinetic
-guarantee can be evaluated on a host without either dependency installed.
+Imports are deferred per subcommand: the module top level imports only argparse and
+each handler imports only what it needs. So ``kate bound`` stays pure numpy, pulling
+in neither torch nor deeptime, and the kinetic guarantee can be evaluated on a host
+with neither installed.
 """
 from __future__ import annotations
 
@@ -23,9 +20,6 @@ import os
 import sys
 
 
-# ----------------------------------------------------------------------------- #
-# helpers
-# ----------------------------------------------------------------------------- #
 def _is_artifact_dir(path: str) -> bool:
     return os.path.isdir(path) and os.path.exists(os.path.join(path, "config.json"))
 
@@ -49,9 +43,6 @@ def _load_reference_counts(path: str):
     return obj
 
 
-# ----------------------------------------------------------------------------- #
-# subcommands
-# ----------------------------------------------------------------------------- #
 def cmd_compress(args):
     from .runner import run_kate, print_report
     from .artifact import save_artifact
@@ -353,9 +344,6 @@ def cmd_benchmark(args):
                   cv_dim=args.cv_dim, dt_strided_ns=dt, out=args.out)
 
 
-# ----------------------------------------------------------------------------- #
-# parser
-# ----------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="kate",
