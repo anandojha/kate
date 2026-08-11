@@ -2,7 +2,7 @@
 The ``kate`` command-line entry point and its five subcommands, which cover the
 pipeline end to end:
 
-  kate compress   TOP DCD -o ART      align -> CV/flow -> IGFS -> entropy code + MSM
+  kate compress   TOP DCD -o ART      align -> CV/flow -> select -> entropy code + MSM
   kate decompress ART -o OUT          flow inverse for kept frames (+T4 full-atom)
   kate analyze    ART                 deeptime MSM: timescales, lag scan, Bayesian bars  [T2]
   kate bound      ART REF             ensemble term, transition term, Pinsker pair/path

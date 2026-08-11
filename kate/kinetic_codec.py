@@ -396,7 +396,7 @@ class TICA:
         evecs = evecs[:, :k]
         # Canonicalize the otherwise arbitrary eigenvector signs by forcing the
         # largest-magnitude component of each mode to be positive. This renders the
-        # collective variables, and therefore the seeded flow and IGFS selection,
+        # collective variables, and therefore the seeded flow and frame selection,
         # deterministic and identical between the batch fit() and the streaming
         # finalize(), whose covariances differ only by floating-point roundoff. The
         # streaming KATE pipeline therefore reproduces the in-memory result.

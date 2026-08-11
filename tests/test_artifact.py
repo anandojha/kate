@@ -37,3 +37,28 @@ def test_with_flow_roundtrip_reconstructs_decoder(tmp_path):
     z1, _ = flow.forward(x)
     z2, _ = flow2.forward(x)
     assert torch.allclose(z1, z2, atol=1e-6)
+
+
+def test_kept_weights_survive_the_round_trip(tmp_path):
+    """The selection weights must reach the file. Farthest-point selection
+    over-represents the low-density tails, so an artifact without them yields a biased
+    ensemble average and the ensemble term of the certificate does not describe the
+    stored object. The weights were once computed on the demo path only and never
+    written, which this pins down."""
+    art = toy_artifact(a=0.03, seed=3)
+    art.kept_weights = np.array([0.5, 0.25, 0.25])
+    p = str(tmp_path / "w.kate")
+    save_artifact(art, p)
+    loaded = load_artifact(p, with_flow=False)
+    assert loaded.kept_weights is not None
+    assert np.allclose(loaded.kept_weights, art.kept_weights)
+    assert abs(float(loaded.kept_weights.sum()) - 1.0) < 1e-12
+
+
+def test_artifact_without_weights_still_loads(tmp_path):
+    """Files written before the weights were stored must remain readable."""
+    art = toy_artifact(a=0.03, seed=4)
+    art.kept_weights = None
+    p = str(tmp_path / "old.kate")
+    save_artifact(art, p)
+    assert load_artifact(p, with_flow=False).kept_weights is None

@@ -38,7 +38,8 @@ import numpy as np
 import torch
 
 from .flow import RealNVP
-from .codec import igfs_select, encode_iid, decode_iid, gaussian_cumfreq
+from .codec import (igfs_select, encode_iid, decode_iid, gaussian_cumfreq,
+                    stationary_reweight)
 from .kinetic_codec import (kabsch_align, TICA, discretize, count_matrix,
                             transition_matrix, estimate_reversible_T, implied_timescales,
                             largest_connected_set, DitheredResidualCodec)
@@ -65,7 +66,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     """Assemble a compression artifact from precomputed collective variables.
 
     This shared post-collective-variable core executes the full pipeline: flow density
-    estimation, information-gain frame selection, entropy coding, retained-MSM
+    estimation, farthest-point frame selection, entropy coding, retained-MSM
     estimation, path-bound evaluation, full-atom residual coding, and artifact
     construction. ``fetch_kept(global_indices)`` returns the aligned flattened
     coordinates of shape (n_keep, 3N) for the kept frames; this is an in-memory slice
@@ -93,10 +94,16 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     with torch.no_grad():
         z_all = flow.forward(torch.as_tensor(CV_all))[0].numpy()
 
-    # Information-gain frame selection followed by lossless coding of the kept
-    # latents against the base density N(0, I).
+    # Farthest-point frame selection followed by lossless coding of the kept latents
+    # against the base density N(0, I). Selection maximizes coverage and therefore
+    # over-represents the low-density tails, so the Voronoi-cell weights that carry the
+    # kept subset back to the empirical density are computed here, where the full
+    # base-space set is available, and stored alongside it. Without them an ensemble
+    # average over the kept frames is biased and the ensemble term of the certificate
+    # does not describe the stored object.
     n_keep = max(2, int(keep_frac * T_total))
     kept = igfs_select(z_all, n_keep, seed=seed)
+    kept_weights = stationary_reweight(z_all, kept)
     L = 1 << lat_bits
     zmax = max(6.0, float(np.abs(z_all[kept]).max()) * 1.02)
     cum = gaussian_cumfreq(L, zmax)
@@ -132,7 +139,15 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     Tm_act, msm_estimator = estimate_reversible_T(C[np.ix_(act, act)])
     its = implied_timescales(Tm_act, lag, 5)
     its_ns = its * dt_strided_ns
-    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)  # KATE: Q == P
+    # The transition term vanishes here because the stored model is the reference model:
+    # nothing is re-estimated from lossy coordinates, so Q and P coincide and the report
+    # is the trivial case of the bound. It is retained because the fields it fills are
+    # the same ones `kate bound` populates when comparing two artifacts, where the
+    # comparison is not trivial. A compressor scored this way is not being measured
+    # against anything, so the honest test of the stored kinetics is to rebuild a
+    # trajectory from the artifact and re-estimate, as `kate bound` against an
+    # independently built reference does.
+    kin = report_kinetic_fidelity(Tm_act, Tm_act, lag=lag, L=T_total, k=4)
 
     # Full-atom residual stage: a method-agnostic linear decoder combined with a
     # dithered residual. A linear collective-variable-to-coordinate decoder, fit on the
@@ -214,7 +229,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
 
     artifact = Artifact(
         cv_dim=cv_dim, L=L, zmax=zmax, n_keep=len(kept),
-        coded_latents=coded, kept_idx=kept,
+        coded_latents=coded, kept_idx=kept, kept_weights=kept_weights,
         run_lengths=run_lengths, dtraj=labels, centers=centers, counts=C,
         T_msm=T_msm, msm_estimator=msm_estimator, n_states=nstates, lag=lag,
         stride=stride, dt_ps=dt_ps, dt_strided_ns=dt_strided_ns,

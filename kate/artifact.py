@@ -37,7 +37,7 @@ class Artifact:
     zmax: float
     n_keep: int
     coded_latents: bytes               # entropy-coded kept latents
-    kept_idx: np.ndarray               # indices of retained (IGFS) frames
+    kept_idx: np.ndarray               # indices of retained frames
     # Kinetics: the dynamics term of the artifact.
     run_lengths: List[int]
     dtraj: List[np.ndarray]            # run-aware per-frame integer microstate labels
@@ -64,6 +64,11 @@ class Artifact:
     tica_timescales: Optional[np.ndarray] = None
     align_ref: Optional[np.ndarray] = None     # (N,3) alignment reference (full-atom recon)
     x_mean: Optional[np.ndarray] = None        # (3N,) mean config in aligned space
+    # Voronoi-cell weights carrying the kept subset back to the empirical density.
+    # Farthest-point selection over-represents the low-density tails, so an unweighted
+    # average over the kept frames is biased and the ensemble term of the certificate
+    # describes the reweighted subset rather than the raw selection.
+    kept_weights: Optional[np.ndarray] = None
     # T4 residual stage; None until added by T4.
     residual: Optional[dict] = None
     # T8 temporal and T9 predictive learned-entropy models; None unless used.
@@ -149,7 +154,8 @@ def save_artifact(art: Artifact, path: str) -> str:
                                         for d in art.dtraj]) if art.dtraj
                         else np.zeros(0, dtype=np.int64),
     }
-    for name in ("tica_mean", "tica_eigvecs", "tica_timescales", "align_ref", "x_mean"):
+    for name in ("tica_mean", "tica_eigvecs", "tica_timescales", "align_ref", "x_mean",
+                 "kept_weights"):
         v = getattr(art, name)
         if v is not None:
             arrays[name] = np.asarray(v, dtype=np.float64)
@@ -218,6 +224,7 @@ def load_artifact(path: str, with_flow: bool = True) -> Artifact:
         n_keep=int(cfg["n_keep"]),
         coded_latents=npz["coded_latents"].tobytes(),
         kept_idx=npz["kept_idx"],
+        kept_weights=npz["kept_weights"] if "kept_weights" in npz.files else None,
         run_lengths=run_lengths, dtraj=dtraj,
         centers=npz["centers"], counts=npz["counts"], T_msm=npz["T_msm"],
         n_states=int(cfg["n_states"]), lag=int(cfg["lag"]),

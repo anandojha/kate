@@ -44,7 +44,7 @@ KATE compresses an MD trajectory with its kinetics as the fidelity target. Gener
 
 ## Method
 
-Configurations are aligned by the Kabsch algorithm and reduced to a small set of slow collective variables by TICA. A normalizing flow learns an exact-likelihood density over the collective variables, so a divergence measured in its Gaussian base space transfers to configuration space without a Gaussian-reference assumption. A representative frame subset is retained by information-gain (farthest-point) selection and reweighted to the stationary measure, and the kept latents are entropy-coded losslessly against the base density. The dynamics are retained separately as a reversible-MLE Markov state model estimated on the collective variables. The path-distribution KL factorizes into an ensemble term, bounded through Pinsker for static observables, and a transition term for the kinetics; together they certify the fidelity of kinetic observables.
+Configurations are aligned by the Kabsch algorithm and reduced to a small set of slow collective variables by TICA. A normalizing flow learns an exact-likelihood density over the collective variables, so a divergence measured in its Gaussian base space transfers to configuration space without a Gaussian-reference assumption. A representative frame subset is retained by farthest-point selection in base space and reweighted to the stationary measure by Voronoi-cell population, and the kept latents are entropy-coded losslessly against the base density. The dynamics are retained separately as a reversible-MLE Markov state model estimated on the collective variables. The path-distribution KL factorizes into an ensemble term, bounded through Pinsker for static observables, and a transition term for the kinetics; together they certify the fidelity of kinetic observables.
 
 ## Features
 
@@ -56,8 +56,8 @@ Configurations are aligned by the Kabsch algorithm and reduced to a small set of
 
 ### Model
 
-- **Exact-likelihood normalizing flow.** From-scratch RealNVP and rational-quadratic spline coupling flows, invertible by construction, so kept frames reconstruct exactly and the density is exact.
-- **Reweighted frame selection.** Farthest-point coverage in base space, with stationary Voronoi-cell weights so ensemble averages over the kept subset are unbiased.
+- **Exact-likelihood normalizing flow.** From-scratch RealNVP and rational-quadratic spline coupling flows. The flow map is invertible and its density is exact, so the change of variables carries a divergence from base space to collective-variable space without approximation. The codec around it is lossy: latents are quantized and the collective-variable projection discards the fast modes, which the residual stage only partly restores. Reconstruction error is reported as `cv_recon_err` and `fullatom_rmsd`.
+- **Reweighted frame selection.** Farthest-point coverage in base space, with stationary Voronoi-cell weights stored in the artifact so ensemble averages over the kept subset are unbiased. Selection itself is geometric and uses no density.
 - **Witten-Neal-Cleary entropy coder.** A textbook arithmetic coder codes the kept latents against the flow base density and the discrete-state sequence against the MSM.
 
 ### Kinetics and rigor

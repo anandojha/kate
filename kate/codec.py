@@ -37,7 +37,7 @@ The flow runs on the full Cartesian vector so that kept-frame reconstruction is
 exact. For a protein-scale system, 3N of order 5000, one would train a larger flow on
 a GPU or reduce dimensionality first and accept loss in the discarded fast modes. The
 frame selector here is farthest-point sampling, one concrete instance of an
-information-gain selector.
+farthest-point selector.
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ def gaussian_cumfreq(L: int, zmax: float) -> np.ndarray:
     return _probs_to_cumfreq(p)
 
 
-# Information-gain frame selection by farthest-point sampling in base space.
+# Frame selection by farthest-point sampling in base space.
 
 def igfs_select(z: np.ndarray, n_keep: int, seed: int = 0) -> np.ndarray:
     """Select frames by greedy farthest-point sampling in the flow's base space.
@@ -229,7 +229,7 @@ class KateCodec:
             z_all, _ = flow.forward(torch.as_tensor(X, dtype=torch.float32))
         z_all = z_all.numpy()
 
-        # Stage 2: information-gain frame selection, with stationary importance weights
+        # Stage 2: farthest-point frame selection, with stationary importance weights
         # that reweight the tail-heavy coverage subset back to the empirical measure.
         n_keep = max(2, int(self.n_keep_frac * X.shape[0]))
         kept = igfs_select(z_all, n_keep, seed=self.seed)
@@ -296,7 +296,7 @@ class KateCodec:
         if w is None:
             import warnings
             warnings.warn("artifact has no kept_weights; ensemble average is the biased "
-                          "uniform mean over the tail-heavy IGFS subset", RuntimeWarning)
+                          "uniform mean over the tail-heavy kept subset", RuntimeWarning)
             w = np.full(ct.n_keep, 1.0 / ct.n_keep)
         w = np.asarray(w, dtype=np.float64)
         return np.tensordot(w, v, axes=(0, 0))

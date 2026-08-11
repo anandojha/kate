@@ -7,7 +7,7 @@ standard-normal base space z, invertible by construction. The Kullback-Leibler
 divergence is invariant under an invertible map, so a divergence measured in the
 Gaussian base space transfers exactly to x and the path-space bound holds without
 assuming the CV data are Gaussian. The flow also yields a tractable density
-log p(x), which is both the information-gain signal for frame selection and the
+log p(x), which gives the exact change of variables for the bound and the
 model the entropy coder writes against, at a cost of -log2 p(x) bits.
 
 The map is a stack of affine coupling layers (Dinh, Sohl-Dickstein, Bengio, ICLR
