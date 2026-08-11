@@ -329,7 +329,7 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", features="c
                         cv_dim=6, keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
                         dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                         entropy="gaussian", flow_kind="realnvp",
-                        predictive_kind="gru") -> Tuple[Artifact, dict]:
+                        predictive_kind="gru", feature_atoms=64, feature_sep=2) -> Tuple[Artifact, dict]:
     """Run in-memory, run-aware flow-based KATE on a list of coordinate arrays.
 
     Each input array has shape (T_i, N, 3) in nanometres. ``cv`` selects the
@@ -337,7 +337,14 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", features="c
     selects the TICA featurization: 'cartesian' (aligned coordinates, the default) or
     'contacts' (rotation- and translation-invariant inter-atomic distances, which remove
     spurious rigid-body slow modes and are physically preferred for kinetics). The
-    ``features`` argument is ignored when cv='vampnet'."""
+    ``features`` argument is ignored when cv='vampnet'.
+
+    ``feature_atoms`` and ``feature_sep`` set the contact featurization resolution: the
+    cap on the evenly spaced atom subset and the minimum sequence separation of a pair.
+    They matter when the stored model is compared against a reference analysis built on
+    its own featurization, since two resolutions can resolve different slow modes on the
+    same trajectory and the disagreement grows with chain length. Matching them to the
+    reference makes the comparison a measurement of compression loss alone."""
     ref = None
     aligned = []
     for r in coords_runs:
@@ -348,7 +355,8 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", features="c
     if cv == "vampnet":
         CV_runs, cv_meta = _vampnet_cvs(aligned, lag, cv_dim, x_mean, epochs, seed, verbose)
     elif features == "contacts":
-        CV_runs, cv_meta = _contact_cvs(coords_runs, lag, cv_dim, verbose)
+        CV_runs, cv_meta = _contact_cvs(coords_runs, lag, cv_dim, verbose,
+                                        max_atoms=feature_atoms, sep=feature_sep)
     else:
         CV_runs, cv_meta = _tica_cvs(aligned, lag, cv_dim, x_mean, verbose)
     return _assemble_artifact(CV_runs, lambda idx: X_all[idx], cv_meta, ref,
