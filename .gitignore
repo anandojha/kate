@@ -37,6 +37,7 @@ benchmark_*.csv
 
 # --- test / tooling caches ---
 .pytest_cache/
+install_pytest.log
 .coverage
 htmlcov/
 .mypy_cache/
