@@ -604,3 +604,84 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def reconstruct_full_length(art):
+    """Rebuild a trajectory of the original length from a compressed artifact.
+
+    ``kate decompress`` returns the retained frames alone. Re-estimating kinetics from
+    the file, or comparing it against a coordinate compressor on equal terms, needs one
+    structure per original frame, which has to come from the stored microstate sequence.
+
+    Each microstate is represented by the retained frame nearest its centre in
+    collective-variable space rather than by the mean of its members. A mean is not a
+    conformation the molecule ever adopts, and under a distance featurization the mean of
+    a fluctuating set is systematically more compact than its members, by convexity of
+    the norm. The deficit grows with the internal spread of the state, so disordered
+    states are compacted more than ordered ones and drift toward the folded region of
+    feature space. Populations that the reference analysis separates are then merged, and
+    a deterministic merge of a reversible chain can only depress its slowest implied
+    timescale (Sarich, Multiscale Model. Simul. 8, 1154, 2010; Djurdjevac, Multiscale
+    Model. Simul. 10, 61, 2012). Substituting a real conformation removes the compaction
+    at no cost in stored bits, since the representative is a frame the artifact already
+    holds. Retained frames keep their own exactly coded values.
+
+    Returns (X, runs) with X of shape (T, N, 3) in the Kabsch frame of ``art.align_ref``
+    and ``runs`` the same array split at the stored run boundaries.
+    """
+    from .artifact import load_artifact  # noqa: F401  (kept for symmetry of the API)
+    res = art.residual
+    if res is None:
+        raise ValueError("artifact has no residual stage, so no full-atom reconstruction")
+    cum = gaussian_cumfreq(art.L, art.zmax)
+    lev = decode_iid(art.coded_latents, art.n_keep * art.cv_dim, cum)
+    lev = lev.reshape(art.n_keep, art.cv_dim)
+    z = -art.zmax + (lev + 0.5) * (2.0 * art.zmax / art.L)
+    with torch.no_grad():
+        cv_kept = art.build_flow().inverse(torch.as_tensor(z, dtype=torch.float32)).numpy()
+    cv_kept = cv_kept.astype(np.float64)
+
+    B = np.asarray(res["B"], dtype=np.float64)
+    cmean = np.asarray(res["cmean"], dtype=np.float64)
+    xmean = np.asarray(res["xmean"], dtype=np.float64)
+    smR = np.asarray(res["state_mean_R"], dtype=np.float64)
+    labels_kept = np.asarray(res["labels_kept"]).astype(int)
+    N = int(res["n_atoms"])
+
+    # The dither is drawn at the shape of the whole array, so dequantizing a subset of
+    # the rows would regenerate a different realization; the full array is decoded once
+    # and indexed afterwards.
+    rc = DitheredResidualCodec(n_bits=int(res["n_bits"]), seed=int(res["seed"]))
+    R_kept = rc.dequantize(np.asarray(res["q"]), float(res["step"])) + smR[labels_kept]
+
+    centers = np.asarray(art.centers, dtype=np.float64)
+    dtraj = np.concatenate([np.asarray(d, dtype=np.int64) for d in art.dtraj])
+    if not np.array_equal(dtraj[np.asarray(art.kept_idx, dtype=np.int64)], labels_kept):
+        raise ValueError("kept_idx and the concatenated dtraj disagree with labels_kept")
+
+    rep_cv = centers.copy()
+    rep_R = smR.copy()
+    for s in np.unique(labels_kept):
+        sel = np.where(labels_kept == s)[0]
+        j = sel[np.argmin(((cv_kept[sel] - centers[s]) ** 2).sum(axis=1))]
+        rep_cv[s] = cv_kept[j]
+        rep_R[s] = R_kept[j]
+    # A microstate with no retained frame keeps the mean of the nearest state that has
+    # one; its own mean residual is identically zero and would drop the correction.
+    occupied = np.zeros(art.n_states, dtype=bool)
+    occupied[np.unique(labels_kept)] = True
+    if not occupied.all():
+        occ = np.where(occupied)[0]
+        d2 = ((centers[:, None, :] - centers[None, occ, :]) ** 2).sum(axis=-1)
+        near = occ[np.argmin(d2, axis=1)]
+        rep_cv[~occupied] = rep_cv[near[~occupied]]
+        rep_R[~occupied] = rep_R[near[~occupied]]
+
+    CV = rep_cv[dtraj]
+    R = rep_R[dtraj]
+    kept = np.asarray(art.kept_idx, dtype=np.int64)
+    CV[kept] = cv_kept
+    R[kept] = R_kept
+    X = ((CV - cmean) @ B + xmean + R).reshape(len(dtraj), N, 3)
+    off = np.cumsum([0] + list(art.run_lengths))
+    return X, [X[off[i]:off[i + 1]] for i in range(len(art.run_lengths))]
