@@ -102,7 +102,7 @@ conda activate kate
 pip install -e ".[kinetics,test]"
 ```
 
-The baseline compressors used in the twelve-protein benchmark (SZ3, ZFP, fpzip, SPERR, MDZip) are external and install separately; see [`COMPRESSORS.md`](COMPRESSORS.md).
+The baseline compressors used in the twelve-protein benchmark (SZ3, ZFP, fpzip, SPERR, MDZip) are external and install separately; see [`COMPRESSORS.md`](COMPRESSORS.md). A complete walkthrough of the benchmark itself, covering the single environment that holds every tool, the DESRES data layout, the per-complex parameters, and the one-command driver, is in [`benchmarks/README.md`](benchmarks/README.md).
 
 ## Testing
 
