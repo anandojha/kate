@@ -74,10 +74,24 @@ class Artifact:
     # T8 temporal and T9 predictive learned-entropy models; None unless used.
     temporal_arch: Optional[dict] = None
     predictive_arch: Optional[dict] = None
+    # Optional conditional-flow coordinate decoder; None unless flow_decoder=True at
+    # compress time. It affects only reconstructed coordinates, never the stored kinetics.
+    flow_decoder_arch: Optional[dict] = None
     # Flow and entropy-model weights (torch state_dicts); None when with_flow=False.
     flow_state: Optional[dict] = field(default=None, repr=False)
     temporal_state: Optional[dict] = field(default=None, repr=False)
     predictive_state: Optional[dict] = field(default=None, repr=False)
+    flow_decoder_state: Optional[dict] = field(default=None, repr=False)
+
+    def build_flow_decoder(self):
+        """Reconstruct the conditional-flow coordinate decoder from its saved state."""
+        if self.flow_decoder_state is None or self.flow_decoder_arch is None:
+            raise ValueError("artifact has no flow decoder (compress with flow_decoder=True)")
+        from .flow import ConditionalRealNVP
+        m = ConditionalRealNVP(**self.flow_decoder_arch)
+        m.load_state_dict(self.flow_decoder_state)
+        m.eval()
+        return m
 
     def build_temporal(self):
         """Reconstruct the TemporalPrior (T8) from its architecture and state.
@@ -132,7 +146,8 @@ class Artifact:
 # config.json holds only JSON-serializable scalars, lists, and strings.
 _CONFIG_KEYS = ("cv_dim", "L", "zmax", "n_keep", "run_lengths", "n_states", "lag",
                 "stride", "dt_ps", "dt_strided_ns", "flow_arch", "cv", "flow_kind",
-                "entropy", "msm_estimator", "temporal_arch", "predictive_arch")
+                "entropy", "msm_estimator", "temporal_arch", "predictive_arch",
+                "flow_decoder_arch")
 
 
 def save_artifact(art: Artifact, path: str) -> str:
@@ -182,6 +197,9 @@ def save_artifact(art: Artifact, path: str) -> str:
     if art.predictive_state is not None:
         import torch
         torch.save(art.predictive_state, os.path.join(path, "predictive.pt"))
+    if art.flow_decoder_state is not None:
+        import torch
+        torch.save(art.flow_decoder_state, os.path.join(path, "flow_decoder.pt"))
     return path
 
 
@@ -218,6 +236,10 @@ def load_artifact(path: str, with_flow: bool = True) -> Artifact:
     if with_flow and os.path.exists(os.path.join(path, "predictive.pt")):
         import torch
         predictive_state = torch.load(os.path.join(path, "predictive.pt"), weights_only=True)
+    flow_decoder_state = None
+    if with_flow and os.path.exists(os.path.join(path, "flow_decoder.pt")):
+        import torch
+        flow_decoder_state = torch.load(os.path.join(path, "flow_decoder.pt"), weights_only=True)
 
     return Artifact(
         cv_dim=int(cfg["cv_dim"]), L=int(cfg["L"]), zmax=float(cfg["zmax"]),
@@ -243,4 +265,5 @@ def load_artifact(path: str, with_flow: bool = True) -> Artifact:
         temporal_arch=cfg.get("temporal_arch"), temporal_state=temporal_state,
         predictive_arch=cfg.get("predictive_arch"), predictive_state=predictive_state,
         flow_state=flow_state,
+        flow_decoder_arch=cfg.get("flow_decoder_arch"), flow_decoder_state=flow_decoder_state,
     )

@@ -62,7 +62,8 @@ def kl_1d(p, q, bins):
 
 def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, epochs,
                        nstates, lag, stride, dt_ps, lat_bits, n_bits, seed, verbose,
-                       entropy="gaussian", flow_kind="realnvp", predictive_kind="gru"):
+                       entropy="gaussian", flow_kind="realnvp", predictive_kind="gru",
+                       flow_decoder=False):
     """Assemble a compression artifact from precomputed collective variables.
 
     This shared post-collective-variable core executes the full pipeline: flow density
@@ -177,6 +178,20 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
     full_rec = X_approx_kept + rcodec.dequantize(rq, rstep) + state_mean_R[labels_kept]
     fullatom_rmsd = float(np.sqrt(((full_rec - X_kept) ** 2)
                                   .reshape(len(kept), -1, 3).sum(2).mean()))
+
+    # Optional conditional-flow coordinate decoder. Trained on the kept frames' residual
+    # given their collective variable, it produces a smoother per-state representative
+    # than the fixed conformation. This touches only reconstructed coordinates, never the
+    # stored kinetics, and by the trade the paper documents it improves structure while
+    # slightly degrading a re-estimated rate, so it stays opt-in and the medoid is default.
+    flow_decoder_state = flow_decoder_arch = None
+    if flow_decoder:
+        from .flow import ConditionalRealNVP
+        fd_arch = {"dim": int(D), "cond_dim": int(cv_dim), "hidden": 128, "n_layers": 8}
+        fdec = ConditionalRealNVP(**fd_arch).fit(R_kept, cv_rec, epochs=max(10, epochs // 4),
+                                                 seed=seed, verbose=verbose)
+        flow_decoder_arch = fd_arch
+        flow_decoder_state = {k: v.detach().cpu() for k, v in fdec.state_dict().items()}
     # Steric validity. This force-field-free geometry check tests whether the
     # reconstruction introduces atomic overlaps absent from the original. The metric is
     # the smallest inter-atomic distance per frame, whose natural floor is the bonded
@@ -241,6 +256,7 @@ def _assemble_artifact(CV_runs, fetch_kept, cv_meta, ref, *, cv_dim, keep_frac, 
         temporal_arch=temporal_arch, temporal_state=temporal_state,
         predictive_arch=predictive_arch, predictive_state=predictive_state,
         flow_state={k: v.detach().cpu() for k, v in flow.state_dict().items()},
+        flow_decoder_arch=flow_decoder_arch, flow_decoder_state=flow_decoder_state,
     )
     flow_bytes = sum(p.numel() for p in flow.parameters()) * 4
     report = {
@@ -344,7 +360,8 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", features="c
                         cv_dim=6, keep_frac=0.10, epochs=300, nstates=200, lag=10, stride=1,
                         dt_ps=100.0, lat_bits=14, n_bits=4, seed=0, verbose=True,
                         entropy="gaussian", flow_kind="realnvp",
-                        predictive_kind="gru", feature_atoms=64, feature_sep=2) -> Tuple[Artifact, dict]:
+                        predictive_kind="gru", feature_atoms=64, feature_sep=2,
+                        flow_decoder=False) -> Tuple[Artifact, dict]:
     """Run in-memory, run-aware flow-based KATE on a list of coordinate arrays.
 
     Each input array has shape (T_i, N, 3) in nanometres. ``cv`` selects the
@@ -379,7 +396,7 @@ def compress_trajectory(coords_runs: List[np.ndarray], *, cv="tica", features="c
                               nstates=nstates, lag=lag, stride=stride, dt_ps=dt_ps,
                               lat_bits=lat_bits, n_bits=n_bits, seed=seed,
                               verbose=verbose, entropy=entropy, flow_kind=flow_kind,
-                              predictive_kind=predictive_kind)
+                              predictive_kind=predictive_kind, flow_decoder=flow_decoder)
 
 
 def compress_streaming(chunk_factory: Callable[[], Iterable[np.ndarray]], *, cv_dim=6,
@@ -606,12 +623,20 @@ if __name__ == "__main__":
     main()
 
 
-def reconstruct_full_length(art):
+def reconstruct_full_length(art, decoder="medoid"):
     """Rebuild a trajectory of the original length from a compressed artifact.
 
     ``kate decompress`` returns the retained frames alone. Re-estimating kinetics from
     the file, or comparing it against a coordinate compressor on equal terms, needs one
     structure per original frame, which has to come from the stored microstate sequence.
+
+    ``decoder`` selects how each microstate is turned into a structure. 'medoid' (the
+    default) uses the retained conformation nearest the state centre, which is a real
+    frame and gives the most faithful kinetics. 'flow' uses the optional conditional-flow
+    decoder at its conditional mode, which reconstructs structurally closer coordinates
+    but, being a synthetic point off the data manifold, gives slightly less faithful
+    re-estimated rates. The stored Markov model and the rates it reports are identical
+    either way, so the choice affects only the returned coordinates.
 
     Each microstate is represented by the retained frame nearest its centre in
     collective-variable space rather than by the mean of its members. A mean is not a
@@ -659,6 +684,11 @@ def reconstruct_full_length(art):
     if not np.array_equal(dtraj[np.asarray(art.kept_idx, dtype=np.int64)], labels_kept):
         raise ValueError("kept_idx and the concatenated dtraj disagree with labels_kept")
 
+    if decoder not in ("medoid", "flow"):
+        raise ValueError("decoder must be 'medoid' or 'flow'")
+    if decoder == "flow" and art.flow_decoder_state is None:
+        raise ValueError("artifact has no flow decoder; compress with flow_decoder=True")
+
     rep_cv = centers.copy()
     rep_R = smR.copy()
     for s in np.unique(labels_kept):
@@ -666,6 +696,12 @@ def reconstruct_full_length(art):
         j = sel[np.argmin(((cv_kept[sel] - centers[s]) ** 2).sum(axis=1))]
         rep_cv[s] = cv_kept[j]
         rep_R[s] = R_kept[j]
+    if decoder == "flow":
+        # Replace the medoid residual by the flow's conditional mode at each state centre.
+        # The CV representative still comes from the medoid so the linear decode is shared.
+        fdec = art.build_flow_decoder()
+        with torch.no_grad():
+            rep_R = fdec.mode(centers).numpy().astype(np.float64)
     # A microstate with no retained frame keeps the mean of the nearest state that has
     # one; its own mean residual is identically zero and would drop the correction.
     occupied = np.zeros(art.n_states, dtype=bool)
@@ -675,7 +711,8 @@ def reconstruct_full_length(art):
         d2 = ((centers[:, None, :] - centers[None, occ, :]) ** 2).sum(axis=-1)
         near = occ[np.argmin(d2, axis=1)]
         rep_cv[~occupied] = rep_cv[near[~occupied]]
-        rep_R[~occupied] = rep_R[near[~occupied]]
+        if decoder == "medoid":                      # the flow gives a valid mode for every state
+            rep_R[~occupied] = rep_R[near[~occupied]]
 
     CV = rep_cv[dtraj]
     R = rep_R[dtraj]

@@ -133,6 +133,124 @@ class RealNVP(nn.Module):
         return self
 
 
+class _CondCoupling(nn.Module):
+    """An affine coupling layer conditioned on an external vector c.
+
+    The scale and shift networks read the frozen half of x together with the condition
+    c, so the transform of the active half depends on c. This is the standard conditional
+    RealNVP construction (Dinh, Sohl-Dickstein, Bengio, ICLR 2017; conditioning as in
+    Winkler et al., arXiv:1912.00042)."""
+
+    def __init__(self, dim, cond_dim, hidden, mask):
+        super().__init__()
+        self.register_buffer("mask", mask)
+        self.net = nn.Sequential(
+            nn.Linear(dim + cond_dim, hidden), nn.ReLU(),
+            nn.Linear(hidden, hidden), nn.ReLU(),
+            nn.Linear(hidden, 2 * dim))
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def _st(self, x_frozen, c):
+        s, t = self.net(torch.cat([x_frozen, c], dim=-1)).chunk(2, dim=-1)
+        comp = 1.0 - self.mask
+        return torch.tanh(s) * comp, t * comp
+
+    def forward(self, x, c):
+        xf = x * self.mask
+        s, t = self._st(xf, c)
+        return xf + (1.0 - self.mask) * (x * torch.exp(s) + t), s.sum(-1)
+
+    def inverse(self, y, c):
+        yf = y * self.mask
+        s, t = self._st(yf, c)
+        return yf + (1.0 - self.mask) * ((y - t) * torch.exp(-s))
+
+
+class ConditionalRealNVP(nn.Module):
+    """A RealNVP flow over x conditioned on a vector c, the optional coordinate decoder.
+
+    KATE's default reconstruction represents a microstate by one real conformation, which
+    keeps the kinetics but leaves the coordinates coarse. This models the coordinate
+    residual conditioned on the slow collective variable, p(residual | c), so a smoother
+    per-state structure can be produced from the flow at its conditional mode. It is
+    optional and off the kinetic pathway: the stored Markov model and the reported rates
+    are unchanged, and this only affects coordinates a caller asks to reconstruct. The
+    reconstructed coordinates are more accurate structurally and, by the same trade the
+    paper documents, slightly less accurate kinetically, so the medoid stays the default.
+
+    Standardization of both x and the condition is folded into fixed buffers so a saved
+    state dictionary fully determines the map."""
+
+    def __init__(self, dim: int, cond_dim: int, hidden: int = 128, n_layers: int = 8):
+        super().__init__()
+        self.dim = dim
+        self.cond_dim = cond_dim
+        layers = []
+        for i in range(n_layers):
+            m = (torch.arange(dim) % 2).float()
+            if i % 2 == 0:
+                m = 1.0 - m
+            layers.append(_CondCoupling(dim, cond_dim, hidden, m))
+        self.layers = nn.ModuleList(layers)
+        self.register_buffer("mean_", torch.zeros(dim))
+        self.register_buffer("std_", torch.ones(dim))
+        self.register_buffer("cmean_", torch.zeros(cond_dim))
+        self.register_buffer("cstd_", torch.ones(cond_dim))
+
+    def _cn(self, c):
+        return (c - self.cmean_) / self.cstd_
+
+    def forward(self, x, c):
+        z = (x - self.mean_) / self.std_
+        cc = self._cn(c)
+        logdet = -torch.log(self.std_).sum().expand(x.shape[0]).clone()
+        for layer in self.layers:
+            z, d = layer(z, cc)
+            logdet = logdet + d
+        return z, logdet
+
+    def inverse(self, z, c):
+        x = z
+        cc = self._cn(c)
+        for layer in reversed(self.layers):
+            x = layer.inverse(x, cc)
+        return x * self.std_ + self.mean_
+
+    def log_prob(self, x, c):
+        z, logdet = self.forward(x, c)
+        base = -0.5 * (z ** 2 + math.log(2 * math.pi))
+        return base.sum(-1) + logdet
+
+    @torch.no_grad()
+    def mode(self, c):
+        """The conditional mode, the learned per-condition representative (z = 0)."""
+        c = torch.as_tensor(np.asarray(c), dtype=torch.float32)
+        return self.inverse(torch.zeros(c.shape[0], self.dim), c)
+
+    def fit(self, X, C, epochs: int = 20, lr: float = 1e-3, batch: int = 4096,
+            verbose: bool = True, seed: int = 0):
+        torch.manual_seed(seed)
+        X = torch.as_tensor(np.asarray(X), dtype=torch.float32)
+        C = torch.as_tensor(np.asarray(C), dtype=torch.float32)
+        with torch.no_grad():
+            self.mean_.copy_(X.mean(0)); self.std_.copy_(X.std(0) + 1e-6)
+            self.cmean_.copy_(C.mean(0)); self.cstd_.copy_(C.std(0) + 1e-6)
+        opt = torch.optim.Adam(self.parameters(), lr=lr)
+        n = X.shape[0]
+        for ep in range(epochs):
+            perm = torch.randperm(n)
+            for i in range(0, n, batch):
+                idx = perm[i:i + batch]
+                loss = -self.log_prob(X[idx], C[idx]).mean()
+                opt.zero_grad(); loss.backward(); opt.step()
+            if verbose and (ep == 0 or ep == epochs - 1):
+                with torch.no_grad():
+                    nll = -self.log_prob(X, C).mean().item()
+                print("  flow-decoder epoch %3d  NLL/dim = %.4f" % (ep, nll / self.dim))
+        return self
+
+
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     torch.manual_seed(0)

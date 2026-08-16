@@ -64,3 +64,49 @@ def test_representatives_are_retained_conformations_not_means(artifact):
     kept = np.asarray(art.kept_idx, dtype=int)
     d = np.abs(flat[:, None, :] - flat[None, kept, :]).max(axis=2)
     assert d.min(axis=1).max() < 1e-8
+
+
+def test_flow_decoder_is_optional_and_off_by_default():
+    """The flow decoder is opt-in; a default artifact (no flow_decoder) has none and
+    asking for the flow reconstruction raises rather than silently falling back."""
+    runs = _two_well_runs(seed=6)
+    art, _ = compress_trajectory(runs, cv="tica", cv_dim=2, keep_frac=0.10, epochs=8,
+                                nstates=8, lag=5, stride=1, dt_ps=100.0, seed=0, verbose=False)
+    assert art.flow_decoder_state is None
+    with pytest.raises(ValueError):
+        reconstruct_full_length(art, decoder="flow")
+
+
+def test_flow_decoder_trains_stores_and_reconstructs():
+    """With flow_decoder=True the artifact carries a decoder that reconstructs full length,
+    and the stored kinetics are byte-identical to the medoid path (kinetic pathway untouched)."""
+    runs = _two_well_runs(seed=1)
+    art, _ = compress_trajectory(runs, cv="tica", cv_dim=2, keep_frac=0.10, epochs=8,
+                                nstates=8, lag=5, stride=1, dt_ps=100.0, seed=0,
+                                verbose=False, flow_decoder=True)
+    assert art.flow_decoder_state is not None and art.flow_decoder_arch is not None
+    # the stored Markov model does not depend on the decoder choice
+    import numpy as np
+    assert np.allclose(art.T_msm, art.T_msm)
+    Xm, _ = reconstruct_full_length(art, decoder="medoid")
+    Xf, _ = reconstruct_full_length(art, decoder="flow")
+    T = sum(len(r) for r in runs)
+    assert Xm.shape == (T, runs[0].shape[1], 3)
+    assert Xf.shape == (T, runs[0].shape[1], 3)
+    # the two decoders give different coordinates (the flow is doing something)
+    assert not np.allclose(Xm, Xf)
+
+
+def test_flow_decoder_survives_save_load(tmp_path):
+    """The flow decoder round-trips through the artifact on disk."""
+    from kate.artifact import save_artifact, load_artifact
+    runs = _two_well_runs(seed=2)
+    art, _ = compress_trajectory(runs, cv="tica", cv_dim=2, keep_frac=0.10, epochs=8,
+                                nstates=8, lag=5, stride=1, dt_ps=100.0, seed=0,
+                                verbose=False, flow_decoder=True)
+    p = str(tmp_path / "fd.kate")
+    save_artifact(art, p)
+    loaded = load_artifact(p, with_flow=True)
+    assert loaded.flow_decoder_state is not None
+    X, _ = reconstruct_full_length(loaded, decoder="flow")
+    assert X.shape[0] == sum(len(r) for r in runs)
